@@ -5,9 +5,21 @@
 #include <EEPROM.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <bt.h>
+#include <bta_api.h>
+
+#include <esp_gap_ble_api.h>
+#include <esp_gatts_api.h>
+#include <esp_bt_defs.h>
+#include <esp_bt_main.h>
+#include <esp_bt_main.h>
 
 #include "cc2500_REG.h"
 #include "webform.h"
+
+extern "C" {
+uint8_t temprature_sens_read(); 
+}
 
 #define D21        21              
 #define D22        22
@@ -24,17 +36,30 @@
 #define RADIO_BUFFER_LEN 200 // Размер буфера для приема данных от GSM модема
 
 // assuming that there is a 10k ohm resistor between BAT+ and BAT_PIN, and a 27k ohm resistor between BAT_PIN and GND, as per xBridge circuit diagrams
-#define BATTERY_MAXIMUM   973 //4.2V 1023*4.2*27(27+10)/3.3
-#define BATTERY_MINIMUM   678 //3.0V 1023*3.0*27(27+10)/3.3
+#define  VREF                 3.48 // Опорное напряжение для аналогового входа
+#define  VMAX                 4.1  // Максимальное напряжение батареи
+#define  VMIN                 3.0  // Минимальное напряжение батареи
+#define  R1                   10   // Резистор делителя напряжения между BAT+ и BAT_PIN (кОм)
+#define  R2                   27   // Резистор делителя напряжения между BAT_PIN и GND (кОм)
+int      BATTERY_MAXIMUM  =   VMAX*1023*R2/(R1+R2)/VREF ; //950 4.2V 1023*4.2*27(27+10)/3.3
+int      BATTERY_MINIMUM  =   VMIN*1023*R2/(R1+R2)/VREF ; //678 3.0V 1023*3.0*27/(27+10)/3.3
 
 #define my_webservice_url    "http://parakeet.esen.ru/receiver.cgi"
 #define my_webservice_reply  "!ACK"
-#define my_user_agent        "parakeet-8266"
+#define my_user_agent        "parakeet-ESP32"
 #define my_password_code     "12543"
 
 #define my_wifi_ssid         "ssid"
 #define my_wifi_pwd          "password"
 
+#define GATTS_SERVICE_UUID_XDRIP     0xFFE0  // UID сервиса BLE
+#define GATTS_CHAR_UUID_XDRIP        0xFFE1  // UID значения BLE
+#define GATTS_NUM_HANDLE_TEST_ON     4       
+/* maximum value of a characteristic */
+#define GATTS_CHAR_VAL_LEN_MAX 0xFF
+
+// defines the xBridge protocol functional level.  Sent in each packet as the last byte.
+#define DEXBRIDGE_PROTO_LEVEL (0x01)
 
 unsigned long dex_tx_id;
 char transmitter_id[] = "6E853";
@@ -73,14 +98,53 @@ int battery_percent;
 
 char radio_buff[RADIO_BUFFER_LEN]; // Буффер для чтения данных и прочих нужд
 
-// defines the xBridge protocol functional level.  Sent in each packet as the last byte.
-#define DEXBRIDGE_PROTO_LEVEL (0x01)
+uint16_t ble_gatts_if = ESP_GATT_IF_NONE;
+uint16_t ble_conn_id;
+uint16_t ble_attr_handle;
+
+esp_gatt_srvc_id_t ble_service;
+esp_bt_uuid_t ble_character;
+esp_bt_uuid_t ble_descr_uuid;
 
 // Коды ошибок мигают лампочкой в двоичной системе
 // 1 (0001) - Нет модключения к WiFi
 // 2 (0010) - Облачная служба не отвечает
 // 3 (0011) - Облачная служба возвращает ошибку
 // 4 (0100) - Неверный CRC в сохраненных настройках. Берем настройки по умолчанию
+
+/* value range of a attribute (characteristic) */
+uint8_t attr_str[] = {0x00};
+esp_attr_value_t gatts_attr_val =
+{
+    .attr_max_len = GATTS_CHAR_VAL_LEN_MAX,
+    .attr_len     = sizeof(attr_str),
+    .attr_value   = attr_str,
+};
+
+/* service uuid */
+static uint8_t service_uuid128[32] = {
+    /* LSB <--------------------------------------------------------------------------------> MSB */
+    //first uuid, 16bit, [12],[13] is the value
+    0xfb, 0x34, 0x9b, 0x5f, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x00, 0x00, 0xAB, 0xCD, 0x00, 0x00,
+};
+
+static esp_ble_adv_data_t ble_adv_data = {
+    .set_scan_rsp = false,
+    .include_name = true,
+    .include_txpower = true,
+    .min_interval = 0x20,
+    .max_interval = 0x40,
+    .appearance = 0x00,
+    .manufacturer_len = 0,
+    .p_manufacturer_data =  NULL,
+    .service_data_len = 0,
+    .p_service_data = NULL,
+    .service_uuid_len = 16,
+    .p_service_uuid = service_uuid128,
+    .flag = (ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT),
+};
+
+esp_ble_adv_params_t ble_adv_params;
 
 
 typedef struct _Dexcom_packet
@@ -124,6 +188,8 @@ typedef struct _parakeet_settings
   char wifi_ssid[17];
   char wifi_pwd[18];
   byte bt_format;
+  byte use_gsm;
+  char gsm_apn[31];
   unsigned long checksum; // needs to be aligned
 
 } parakeet_settings;
@@ -475,6 +541,7 @@ void handleRoot() {
   char chk1[8];
   char chk2[8];
   char chk3[8];
+  char chk4[8];
 
 #ifdef DEBUG
   Serial.println("http server root"); 
@@ -502,7 +569,9 @@ void handleRoot() {
       chk3[0] = '\0';
       break;
   } 
-  sprintf(temp,edit_form,current_id,settings.password_code,settings.http_url,settings.wifi_ssid,settings.wifi_pwd,chk1,chk2,chk3);
+  if (settings.use_gsm == 0) chk4[0] = '\0';
+  else sprintf(chk4,"%s","checked");
+  sprintf(temp,edit_form,current_id,settings.password_code,settings.http_url,settings.wifi_ssid,settings.wifi_pwd,chk1,chk2,chk3,chk4,settings.gsm_apn);
 //  server.send(200, "text/html", temp);
   client.println("HTTP/1.1 200 OK");
   client.println("Content-Type: text/html");  
@@ -556,10 +625,16 @@ void handleSave(const String& param_string) {
     settings.bt_format = 2;
     sprintf(bt_frmt,"%s","xBridge");
   }
+  arg1 = paramByName(param_string,"USE_GSM");
+  if (arg1 == "0") settings.use_gsm = 0;
+  else settings.use_gsm = 1;
+  arg1 = paramByName(param_string,"APN");
+  arg1.toCharArray(settings.gsm_apn,31);
+    
   saveSettingsToFlash();
   
-  sprintf(temp, "Configuration saved!<br>DexcomID = %s<br>Password Code = %s<br>URL = %s<br>WiFi SSID = %s<br>WiFi Password = %s<br> BlueTooth format: %s<br>",
-                new_id,settings.password_code,settings.http_url,settings.wifi_ssid,settings.wifi_pwd,bt_frmt);
+  sprintf(temp, "Configuration saved!<br>DexcomID = %s<br>Password Code = %s<br>URL = %s<br>WiFi SSID = %s<br>WiFi Password = %s<br> BlueTooth format: %s<br> Use GSM %d<br> APN = %s",
+                new_id,settings.password_code,settings.http_url,settings.wifi_ssid,settings.wifi_pwd,bt_frmt,settings.use_gsm,settings.gsm_apn);
   client.println("HTTP/1.1 200 OK");
   client.println("Content-Type: text/html");  
   client.println("Connection: close");
@@ -579,6 +654,235 @@ void PrepareWebServer() {
   WiFi.softAP("Parakeet");
   server.begin(); 
   web_server_start_time = millis();   
+}
+
+static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
+{
+    switch (event) {
+    case ESP_GAP_BLE_ADV_DATA_SET_COMPLETE_EVT:
+        esp_ble_gap_start_advertising(&ble_adv_params);
+        break;
+    case ESP_GAP_BLE_ADV_DATA_RAW_SET_COMPLETE_EVT:
+        esp_ble_gap_start_advertising(&ble_adv_params);
+        break;
+    case ESP_GAP_BLE_SCAN_RSP_DATA_RAW_SET_COMPLETE_EVT:
+        esp_ble_gap_start_advertising(&ble_adv_params);
+        break;
+#ifdef DEBUG
+    case ESP_GAP_BLE_ADV_START_COMPLETE_EVT:
+        //advertising start complete event to indicate advertising start successfully or failed
+        if (param->adv_start_cmpl.status != ESP_BT_STATUS_SUCCESS) {
+            Serial.println("Advertising start failed\n");
+        }
+        break;
+    case ESP_GAP_BLE_ADV_STOP_COMPLETE_EVT:
+        if (param->adv_stop_cmpl.status != ESP_BT_STATUS_SUCCESS) {
+            Serial.println("Advertising stop failed\n");
+        }
+        else {
+            Serial.println("Stop adv successfully\n");
+        }
+        break;
+#endif      
+    default:
+        break;
+    }
+}
+
+static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param)
+{
+    esp_err_t ret;
+    
+    switch (event) {
+    case ESP_GATTS_REG_EVT: {
+#ifdef DEBUG
+        printf("REGISTER_APP_EVT, status %d, app_id %d\n", param->reg.status, param->reg.app_id);
+#endif      
+        esp_ble_gatts_create_service(gatts_if, &ble_service, GATTS_NUM_HANDLE_TEST_ON);
+        break;
+    }   
+    case ESP_GATTS_CREATE_EVT: {
+#ifdef DEBUG
+        printf("ESP_GATTS_CREATE_EVT, status %d,  service_handle %d\n", param->create.status, param->create.service_handle);
+#endif      
+        /* 1 service LED and 2 characteristics ON and OFF */
+                
+        ret = esp_ble_gatts_add_char(param->create.service_handle, &ble_character,
+                                     ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
+                                     ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE | ESP_GATT_CHAR_PROP_BIT_NOTIFY | ESP_GATT_CHAR_PROP_BIT_INDICATE,
+                                     &gatts_attr_val, NULL);
+
+        Serial.print("Ret = ");
+        Serial.println(ret);
+        esp_ble_gatts_start_service(param->create.service_handle);
+        break;
+    }    
+    case ESP_GATTS_CONNECT_EVT: {
+    /* create service event */
+#ifdef DEBUG
+        Serial.print("ESP_GATTS_CONNECT_EVT, conn_id = ");
+        Serial.print(param->connect.conn_id);
+        Serial.print(" gatts_if = ");
+        Serial.println(gatts_if);
+#endif      
+        ble_gatts_if = gatts_if;
+        ble_conn_id = param->connect.conn_id;
+        esp_ble_conn_update_params_t conn_params = {0};
+        memcpy(conn_params.bda, param->connect.remote_bda, sizeof(esp_bd_addr_t));
+        /* For the IOS system, please reference the apple official documents about the ble connection parameters restrictions. */
+        conn_params.latency = 0;
+        conn_params.max_int = 0x50;    // max_int = 0x50*1.25ms = 100ms
+        conn_params.min_int = 0x30;    // min_int = 0x30*1.25ms = 60ms
+        conn_params.timeout = 1000;    // timeout = 1000*10ms = 10000ms
+#ifdef DEBUG
+        printf("ESP_GATTS_CONNECT_EVT, conn_id %d, remote %02x:%02x:%02x:%02x:%02x:%02x:, is_conn %d\n",
+                 param->connect.conn_id,
+                 param->connect.remote_bda[0], param->connect.remote_bda[1], param->connect.remote_bda[2],
+                 param->connect.remote_bda[3], param->connect.remote_bda[4], param->connect.remote_bda[5],
+                 param->connect.is_connected);
+#endif      
+        //start sent the update connection parameters to the peer device.
+        esp_ble_gap_update_conn_params(&conn_params);
+        break;
+    }
+    case ESP_GATTS_WRITE_EVT: {
+#ifdef DEBUG
+        printf("ESP_GATTS_WRITE_EVT, conn_id %d, trans_id %d, handle %d\n", param->read.conn_id, param->read.trans_id, param->read.handle);
+#endif      
+        if (param->write.need_rsp){
+          esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, ESP_GATT_OK, NULL);
+        }  
+        break;
+    }    
+    case ESP_GATTS_ADD_CHAR_EVT: {
+#ifdef DEBUG
+        Serial.print("ESP_GATTS_ADD_CHAR_EVT, attr_handle = ");
+        Serial.print(param->add_char.attr_handle);
+        Serial.print(", status = ");
+        Serial.println(param->add_char.status);
+#endif      
+        ble_attr_handle = param->add_char.attr_handle;
+        esp_ble_gatts_add_char_descr(param->add_char.service_handle, &ble_descr_uuid,
+                                     ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE, NULL, NULL);
+        break;
+    }
+    case ESP_GATTS_DISCONNECT_EVT: {
+        ble_gatts_if = ESP_GATT_IF_NONE;
+        ble_conn_id = 0;
+        esp_ble_gap_start_advertising(&ble_adv_params);
+        break;
+    }    
+#ifdef DEBUG
+    case ESP_GATTS_READ_EVT: {
+        printf("ESP_GATTS_READ_EVT, conn_id %d, trans_id %d, handle %d\n", param->read.conn_id, param->read.trans_id, param->read.handle);
+        break;
+    }
+    case ESP_GATTS_EXEC_WRITE_EVT:    {
+        printf("ESP_GATTS_EXEC_WRITE_EVT, conn_id %d, trans_id %d, handle %d\n", param->read.conn_id, param->read.trans_id, param->read.handle);
+        break;
+    }
+    case ESP_GATTS_CONF_EVT: {          
+        Serial.print("ESP_GATTS_CONF_EVT, status = ");
+        Serial.println(param->conf.status);
+        break;
+    }
+    case ESP_GATTS_ADD_CHAR_DESCR_EVT: {      
+        printf("ESP_GATTS_ADD_CHAR_DESCR_EVT, conn_id %d, trans_id %d, handle %d\n", param->conf.conn_id, param->read.trans_id, param->read.handle);
+        break;
+    }
+#endif      
+    default:
+        break;
+    }
+}
+
+void sendBeacon()
+{
+  //char array to store the response in.
+  unsigned char cmd_response[8];
+
+  if (ble_gatts_if == ESP_GATT_IF_NONE ) {
+#ifdef DEBUG
+    Serial.println("Not connected");
+#endif
+    return;
+  }
+  
+  //return if we don't have a connection or if we have already sent a beacon
+  cmd_response[0] = 0x07;
+  cmd_response[1] = 0xF1;
+  memcpy(&cmd_response[2], &settings.dex_tx_id, sizeof(settings.dex_tx_id));
+  cmd_response[6] = DEXBRIDGE_PROTO_LEVEL;
+  cmd_response[7] = '\0';
+  
+   esp_err_t ret = esp_ble_gatts_send_indicate(ble_gatts_if, ble_conn_id, ble_attr_handle, cmd_response[0],&cmd_response[0], false); 
+#ifdef DEBUG
+   if (ret == ESP_OK) {
+     Serial.println("Send indicate OK");    
+   } 
+   else {
+    Serial.println("Send indicate fail");
+   }  
+#endif
+}
+
+void PrepareBlueTooth() {
+    
+    char bt_name[15];
+
+    if (settings.bt_format == 0) return;
+    ble_adv_params.adv_int_min        = 0x20;
+    ble_adv_params.adv_int_max        = 0x40;
+    ble_adv_params.adv_type           = ADV_TYPE_IND;
+    ble_adv_params.own_addr_type      = BLE_ADDR_TYPE_PUBLIC;
+    ble_adv_params.channel_map        = ADV_CHNL_ALL;
+    ble_adv_params.adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY;
+    /* initialize profile and characteristic */
+
+    ble_service.is_primary = true;
+    ble_service.id.inst_id = 0;
+    ble_service.id.uuid.len = ESP_UUID_LEN_16;
+    ble_service.id.uuid.uuid.uuid16 = GATTS_SERVICE_UUID_XDRIP;
+    
+    ble_character.len = ESP_UUID_LEN_16;
+    ble_character.uuid.uuid16 = GATTS_CHAR_UUID_XDRIP;
+
+    ble_descr_uuid.len = ESP_UUID_LEN_16;
+    ble_descr_uuid.uuid.uuid16 = ESP_GATT_UUID_CHAR_CLIENT_CONFIG;
+    
+    esp_err_t ret;
+    /* initialize BLE and bluedroid */
+    btStart();
+    ret = esp_bluedroid_init();
+    if (ret) {
+#ifdef DEBUG
+      Serial.println("init bluetooth failed");
+#endif      
+      return;
+    }
+    ret = esp_bluedroid_enable();
+    if (ret) {
+#ifdef DEBUG
+      Serial.println("enable bluetooth failed");
+#endif      
+      return;
+    }
+    /* set BLE name and broadcast advertising info
+    so that the world can see you*/
+    if (settings.bt_format == 1) {
+      sprintf(bt_name,"xDripESP");
+    } 
+    else if (settings.bt_format == 2) {   
+      sprintf(bt_name,"xBridgeESP");
+    }
+    esp_ble_gap_set_device_name(bt_name);
+    esp_ble_gap_config_adv_data(&ble_adv_data);
+    /* register callbacks to handle events like register device,
+    sending and receiving data */
+    esp_ble_gatts_register_callback(gatts_event_handler);
+    esp_ble_gap_register_callback(gap_event_handler);
+    /* register profiles */
+    esp_ble_gatts_app_register(0);
 }
 
 void setup() {
@@ -801,21 +1105,38 @@ boolean get_packet (void) {
 }
 
 void mesure_battery() {
-  unsigned int val;
+  int val;
 
   val = analogRead(BAT_PIN);
-  battery_milivolts = 1000*3.3*val/1023;
-  battery_percent = (val - BATTERY_MINIMUM)/(BATTERY_MAXIMUM - BATTERY_MINIMUM) * 100;
-  if (battery_percent < 0) battery_percent = 0;
-  if (battery_percent > 100) battery_percent = 100;
+//  val = adc.read(0)  ;
+  battery_milivolts = 1000*VREF*val/1023;
 #ifdef DEBUG
   Serial.print("Analog Read = ");
   Serial.println(val);
+  Serial.print("Milivolts = ");
+  Serial.println(battery_milivolts);
+#endif
+  battery_milivolts = battery_milivolts*(10+27)/27;
+//  if (val < BATTERY_MINIMUM) val = BATTERY_MINIMUM;
+  battery_percent = 100* (val - BATTERY_MINIMUM)/(BATTERY_MAXIMUM - BATTERY_MINIMUM);
+  if (battery_percent < 0) battery_percent = 0;
+  if (battery_percent > 100) battery_percent = 100;
+#ifdef DEBUG
   Serial.print("Battery Milivolts = ");
   Serial.println(battery_milivolts);
   Serial.print("Battery Percent = ");
   Serial.println(battery_percent);
 #endif
+}
+
+byte mesure_temperature() {
+  byte tp = temprature_sens_read(); 
+  tp = ( tp - 32 )/1.8;
+#ifdef DEBUG
+  Serial.print("Temprature = ");  
+  Serial.println(tp);  
+#endif
+  return tp;
 }
 
 void print_packet() {
@@ -891,12 +1212,13 @@ void print_packet() {
     sprintf(radio_buff,"%s?rr=%lu&zi=%lu&pc=%s&lv=%lu&lf=%lu&db=%hhu&ts=%lu&bp=%d&bm=%d&ct=%d",my_webservice_url,millis(),dex_tx_id,my_password_code,
                                                                                                         dex_num_decoder(Pkt.raw),dex_num_decoder(Pkt.filtered)*2,
                                                                                                         Pkt.battery,millis()-catch_time,0, 0, 37);         
-*/                                                                                                        
+*/                       
+    byte tp = mesure_temperature();                                                                                 
     ts = millis()-catch_time;  
     request = my_webservice_url;                                                                                                      
     request = request + "?rr=" + millis() + "&zi=" + dex_tx_id + "&pc=" + my_password_code +
               "&lv=" + dex_num_decoder(Pkt.raw) + "&lf=" + dex_num_decoder(Pkt.filtered)*2 + "&db=" + Pkt.battery +
-              "&ts=" + ts + "&bp=" + battery_percent + "&bm=" + battery_milivolts + "&ct=37"; 
+              "&ts=" + ts + "&bp=" + battery_percent + "&bm=" + battery_milivolts + "&ct=" + tp; 
     http.begin(request); //HTTP
 #ifdef DEBUG
     Serial.println(request);
@@ -943,8 +1265,15 @@ void print_packet() {
 
 void print_bt_packet() {
   RawRecord msg;  
+  byte msg_len;
 
   if (settings.bt_format == 0) {
+    return;
+  }
+  if (ble_gatts_if == ESP_GATT_IF_NONE ) {
+#ifdef DEBUG
+    Serial.println("Not connected");
+#endif
     return;
   }
 //  sprintf(dex_data,"%lu %d %d",275584,battery,3900);
@@ -952,8 +1281,8 @@ void print_bt_packet() {
   digitalWrite(LED_BUILTIN, HIGH);
 #endif
   if (settings.bt_format == 1) {
-    sprintf(radio_buff,"%lu %d %d",dex_num_decoder(Pkt.raw),Pkt.battery,battery_milivolts);
-//    bt_command(radio_buff,0,"OK",2);
+    sprintf(radio_buff,"%lu %d %d\r\n",dex_num_decoder(Pkt.raw),Pkt.battery,battery_milivolts);
+    msg_len = strlen(radio_buff);
   }  
   else if (settings.bt_format == 2) { 
     msg.cmd_code = 0x00;
@@ -976,8 +1305,17 @@ void print_bt_packet() {
     radio_buff[11] = msg.my_battery;
     memcpy(&radio_buff[12],&msg.dex_src_id , 4);
     radio_buff[16] = msg.function;
-    radio_buff[sizeof(msg)] = '\0';
+    msg_len = sizeof(msg);
   }
+   esp_err_t ret = esp_ble_gatts_send_indicate(ble_gatts_if, ble_conn_id, ble_attr_handle, msg_len,(uint8_t*)&radio_buff[0], false); 
+#ifdef DEBUG
+   if (ret == ESP_OK) {
+     Serial.println("Send indicate OK");    
+   } 
+   else {
+    Serial.println("Send indicate fail");
+   }  
+#endif
 #ifdef INT_BLINK_LED    
   digitalWrite(LED_BUILTIN, LOW);
 #endif
@@ -1058,14 +1396,14 @@ void loop() {
       Serial.println("Configuration mode is done!");
 #endif
       if (old_bt_format != settings.bt_format) {
-//        PrepareBlueTooth();
+        PrepareBlueTooth();
         delay(500);
       }
-/*
+
       if (settings.bt_format == 2) {
         sendBeacon();
-      }   
-*/
+      } 
+
     }
     return;
   }

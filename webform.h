@@ -62,6 +62,22 @@ Parakeet-8266 Settings\
   </td>\
 </tr>\
 <tr>\
+  <td width=30%%>\
+    Use Moble network:\
+  </td>\
+  <td>\
+    <input type='checkbox' name='USE_GSM' %s>\
+  </td>\
+</tr>\
+<tr>\
+  <td width=30%%>\
+    Moble network APN:\
+  </td>\
+  <td>\
+    <input type='text' name='APN' maxlength='30' size='30' value=\"%s\">\
+  </td>\
+</tr>\
+<tr>\
   <td align=center>\
     <input type='submit' value='Save' />\
   </td>\
