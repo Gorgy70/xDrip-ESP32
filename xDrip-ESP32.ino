@@ -1,5 +1,7 @@
 #define DEBUG
-#define INT_BLINK_LED
+//#define INT_BLINK_LED
+#define EXT_BLINK_LED
+
 
 #include <SPI.h>
 #include <EEPROM.h>
@@ -27,6 +29,10 @@ uint8_t temprature_sens_read();
 #define GDO0_PIN   D22            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
 #define LEN_PIN    D21            // Цифровой канал, к которму подключен контакт LEN (усилитель слабого сигнала) платы CC2500
 #define BAT_PIN    D34            // Аналоговый канал для измерения напряжения питания
+#ifdef EXT_BLINK_LED
+  #define RED_LED_PIN 5
+  #define YELLOW_LED_PIN 4
+#endif
 
 
 #define NUM_CHANNELS (4)      // Кол-во проверяемых каналов
@@ -95,6 +101,7 @@ byte default_bt_format = 0; // Формат обмена по протколу B
 byte old_bt_format;
 unsigned int battery_milivolts;
 int battery_percent;
+boolean low_battery = false;
 
 char radio_buff[RADIO_BUFFER_LEN]; // Буффер для чтения данных и прочих нужд
 
@@ -337,8 +344,92 @@ void loadSettingsFromFlash()
 #ifdef INT_BLINK_LED
     blink_sequence("0100");
 #endif
+#ifdef EXT_BLINK_LED
+    blink_sequence_red("0100");
+#endif
   }
 }
+
+#ifdef EXT_BLINK_LED
+void blink_sequence_red(const char *sequence) {
+  byte i;
+
+  digitalWrite(YELLOW_LED_PIN, HIGH);
+  digitalWrite(RED_LED_PIN, LOW);
+  delay(500); 
+  for (i = 0; i < strlen(sequence); i++) {
+    digitalWrite(RED_LED_PIN, HIGH);
+    switch (sequence[i]) {
+      case '0': 
+        delay(500);
+        break;
+      case '1': 
+        delay(1000);
+        break;
+      default:
+        delay(2000);
+        break;
+    }
+    digitalWrite(RED_LED_PIN, LOW);
+    delay(500); 
+  }  
+  digitalWrite(YELLOW_LED_PIN, LOW);
+}
+
+void blink_yellow_led_quarter() {  // Blink quarter seconds
+  if ((millis() / 250) % 2) {
+    digitalWrite(YELLOW_LED_PIN, HIGH);
+  } else
+  {
+    digitalWrite(YELLOW_LED_PIN, LOW);
+  }
+}
+
+void blink_yellow_led_half() {  // Blink half seconds
+  if ((millis() / 500) % 2) {
+    digitalWrite(YELLOW_LED_PIN, HIGH);
+  } else
+  {
+    digitalWrite(YELLOW_LED_PIN, LOW);
+  }
+}
+
+void blink_red_led_quarter() {  // Blink quarter seconds
+  if ((millis() / 250) % 2) {
+    digitalWrite(RED_LED_PIN, HIGH);
+  } else
+  {
+    digitalWrite(RED_LED_PIN, LOW);
+  }
+}
+
+void blink_red_led_quarter2() {  // Blink quarter seconds
+  if ((millis() / 250) % 2) {
+    digitalWrite(RED_LED_PIN, LOW);
+  } else
+  {
+    digitalWrite(RED_LED_PIN, HIGH);
+  }
+}
+
+void blink_red_led_half() {  // Blink half seconds
+  if ((millis() / 500) % 2) {
+    digitalWrite(RED_LED_PIN, HIGH);
+  } else
+  {
+    digitalWrite(RED_LED_PIN, LOW);
+  }
+}
+
+void blink_red_led_half2() {  // Blink half seconds
+  if ((millis() / 500) % 2) {
+    digitalWrite(RED_LED_PIN, LOW);
+  } else
+  {
+    digitalWrite(RED_LED_PIN, HIGH);
+  }
+}
+#endif
 
 #ifdef INT_BLINK_LED
 void blink_sequence(const char *sequence) {
@@ -905,6 +996,10 @@ void setup() {
 #ifdef INT_BLINK_LED
   pinMode(LED_BUILTIN, OUTPUT);
 #endif
+#ifdef EXT_BLINK_LED
+  pinMode(RED_LED_PIN, OUTPUT);
+  pinMode(YELLOW_LED_PIN, OUTPUT);
+#endif
 
   loadSettingsFromFlash();
 #ifdef DEBUG
@@ -1022,6 +1117,21 @@ boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
 #ifdef INT_BLINK_LED
     blink_builtin_led_quarter();
 #endif
+#ifdef EXT_BLINK_LED
+    if (dex_tx_id == 10858926 || dex_tx_id == 0)   // ABCDE
+    {
+      blink_yellow_led_half();
+      if (low_battery) {
+        blink_red_led_half2();
+      }
+    } else
+    {
+      blink_yellow_led_quarter();
+      if (low_battery) {
+        blink_red_led_quarter2();
+      }
+    }  
+#endif
     packet_on_board = false;
     while (digitalRead(GDO0_PIN) == HIGH) {
       packet_on_board = true;
@@ -1064,6 +1174,10 @@ boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
 
 #ifdef INT_BLINK_LED
   digitalWrite(LED_BUILTIN, LOW);
+#endif
+#ifdef EXT_BLINK_LED
+  digitalWrite(YELLOW_LED_PIN, LOW);
+  digitalWrite(RED_LED_PIN, LOW);
 #endif
   return nRet;
 }
@@ -1186,6 +1300,9 @@ void print_packet() {
 #ifdef INT_BLINK_LED    
   digitalWrite(LED_BUILTIN, HIGH);
 #endif
+#ifdef EXT_BLINK_LED    
+  digitalWrite(RED_LED_PIN, HIGH);
+#endif
     // wait for WiFi connection
   i = 0;  
   WiFi.begin(settings.wifi_ssid,settings.wifi_pwd);
@@ -1240,11 +1357,17 @@ void print_packet() {
 #ifdef INT_BLINK_LED    
         blink_sequence("0011");
 #endif        
+#ifdef EXT_BLINK_LED    
+        blink_sequence_red("0011");
+#endif        
       }
     } else
     {
 #ifdef INT_BLINK_LED    
       blink_sequence("0010");
+#endif        
+#ifdef EXT_BLINK_LED    
+      blink_sequence_red("0010");
 #endif        
     }
     WiFi.disconnect(true);
@@ -1253,6 +1376,9 @@ void print_packet() {
 #ifdef INT_BLINK_LED    
     blink_sequence("0001");
 #endif   
+#ifdef EXT_BLINK_LED    
+    blink_sequence_red("0001");
+#endif
 #ifdef DEBUG
     Serial.print("WiFi CONNECT ERROR = ");
     Serial.println(WiFi.status());
@@ -1260,6 +1386,9 @@ void print_packet() {
   }
 #ifdef INT_BLINK_LED    
   digitalWrite(LED_BUILTIN, LOW);
+#endif
+#ifdef EXT_BLINK_LED    
+  digitalWrite(RED_LED_PIN, LOW);
 #endif
 }
 
@@ -1279,6 +1408,9 @@ void print_bt_packet() {
 //  sprintf(dex_data,"%lu %d %d",275584,battery,3900);
 #ifdef INT_BLINK_LED    
   digitalWrite(LED_BUILTIN, HIGH);
+#endif
+#ifdef EXT_BLINK_LED    
+  digitalWrite(RED_LED_PIN, HIGH);
 #endif
   if (settings.bt_format == 1) {
     sprintf(radio_buff,"%lu %d %d\r\n",dex_num_decoder(Pkt.raw),Pkt.battery,battery_milivolts);
@@ -1319,6 +1451,9 @@ void print_bt_packet() {
 #ifdef INT_BLINK_LED    
   digitalWrite(LED_BUILTIN, LOW);
 #endif
+#ifdef EXT_BLINK_LED    
+  digitalWrite(RED_LED_PIN, LOW);
+#endif
 }
 
 void HandleWebClient() {
@@ -1330,6 +1465,9 @@ void HandleWebClient() {
 #endif
   
   while (client.connected()) {
+#ifdef EXT_BLINK_LED    
+    blink_red_led_half();
+#endif
     if (client.available()) {
       String req = client.readStringUntil('\r');
 #ifdef DEBUG
@@ -1383,6 +1521,9 @@ void loop() {
 
 // Первые две минуты работает WebServer на адресе 192.168.70.1 для конфигурации устройства
   if (web_server_start_time > 0) {
+#ifdef EXT_BLINK_LED    
+    blink_red_led_half();
+#endif
     client = server.available();
     if (client) {
       HandleWebClient();
@@ -1410,9 +1551,12 @@ void loop() {
   
   if (get_packet ())
   {
-    mesure_battery();
+    mesure_battery();        
     print_bt_packet();
     print_packet ();
+    
+    if (battery_percent > 0 && battery_percent < 30) low_battery = true;
+    else low_battery = false;       
   }
 
 }
