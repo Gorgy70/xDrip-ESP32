@@ -44,11 +44,11 @@ uint8_t temprature_sens_read();
 #define NUM_CHANNELS (4)      // Кол-во проверяемых каналов
 #define FIVE_MINUTE  300000    // 5 минут
 #define TWO_MINUTE   120000    // 2 минуты
-#define WAKEUP_TIME  60000     // Время необходимое для просыпания прибора
+#define WAKEUP_TIME  45000     // Время необходимое для просыпания прибора
 
 #define RADIO_BUFFER_LEN 200 // Размер буфера для приема данных от GSM модема
 
-// assuming that there is a 10k ohm resistor between BAT+ and BAT_PIN, and a 27k ohm resistor between BAT_PIN and GND, as per xBridge circuit diagrams
+// assuming that there is a 10k ohm resistor between BAT+ and BAT_PIN, and a 27k ohm resistor between BAT_PIN and GND
 #define  VREF                 3.48 // Опорное напряжение для аналогового входа
 #define  VMAX                 4.1  // Максимальное напряжение батареи
 #define  VMIN                 3.0  // Минимальное напряжение батареи
@@ -812,6 +812,7 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
 static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param)
 {
     esp_err_t ret;
+    byte dexderip_data[20];
     
     switch (event) {
     case ESP_GATTS_REG_EVT: {
@@ -867,8 +868,28 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
     }
     case ESP_GATTS_WRITE_EVT: {
 #ifdef DEBUG
-        printf("ESP_GATTS_WRITE_EVT, conn_id %d, trans_id %d, handle %d\n", param->read.conn_id, param->read.trans_id, param->read.handle);
+        printf("ESP_GATTS_WRITE_EVT, conn_id %d, trans_id %d, handle %d\n", param->write.conn_id, param->write.trans_id, param->write.handle);
+        Serial.print("data len = ");
+        Serial.println(param->write.len);
+        Serial.print("data = ");
+        Serial.println(*(uint8_t *)param->write.value);
 #endif      
+        memcpy(dexderip_data,param->write.value,param->write.len);
+        if (param->write.len = 0x2 && dexderip_data[0] == 0x2 && dexderip_data[1] == 0xF0) {
+#ifdef DEBUG
+          Serial.println("Data Acknowledge Packet");
+#endif                
+        }
+        if (param->write.len = 0x6 && dexderip_data[0] == 0x2 && dexderip_data[1] == 0x01) {
+          memcpy(&dex_tx_id,&dexderip_data[2],4);
+          settings.dex_tx_id = dex_tx_id;
+          saveSettingsToFlash();
+#ifdef DEBUG
+          Serial.println("New TransmitterID Packet");
+          Serial.print("Dexcom ID: ");
+          Serial.println(dex_tx_id);
+#endif    
+        }
         if (param->write.need_rsp){
           esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, ESP_GATT_OK, NULL);
         }  
@@ -1579,11 +1600,18 @@ void HandleWebClient() {
 
 void esp32_goto_sleep() {
   unsigned long current_time;
-
-  esp_bluedroid_disable();
-  delay(500);
-  esp_bluedroid_deinit();
-  delay(500);
+  esp_bluedroid_status_t stat;
+  
+  stat = esp_bluedroid_get_status();
+  if (stat == ESP_BLUEDROID_STATUS_ENABLED) {
+    esp_bluedroid_disable();
+    delay(500);
+    stat = esp_bluedroid_get_status();
+  }  
+  if (stat == ESP_BLUEDROID_STATUS_INITIALIZED) {
+    esp_bluedroid_deinit();
+    delay(500);
+  }  
   btStop();
 
 #ifdef DEBUG
@@ -1621,9 +1649,6 @@ void loop() {
 #endif
       PrepareBlueTooth();
       delay(500);
-      if (settings.bt_format == 2) {
-        sendBeacon();
-      } 
       mesure_battery();        
     }
     return;
@@ -1635,7 +1660,9 @@ void loop() {
     delay(500);
     print_packet ();
 //  - Отправить пакет по модему, если он не ушел по ВайФай    
-  }
+  } 
+  else sendBeacon();
+  
   if (next_time > 0) {
     esp32_goto_sleep();    
   }
