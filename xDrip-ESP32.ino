@@ -1,6 +1,6 @@
 #define DEBUG
-//#define INT_BLINK_LED
-#define EXT_BLINK_LED
+#define INT_BLINK_LED
+//#define EXT_BLINK_LED
 
 
 #include <SPI.h>
@@ -23,6 +23,8 @@ extern "C" {
 uint8_t temprature_sens_read(); 
 }
 
+#define D4         4              
+#define D15        15              
 #define D21        21              
 #define D22        22
 #define D34        34
@@ -30,14 +32,19 @@ uint8_t temprature_sens_read();
 #define LEN_PIN    D21            // Цифровой канал, к которму подключен контакт LEN (усилитель слабого сигнала) платы CC2500
 #define BAT_PIN    D34            // Аналоговый канал для измерения напряжения питания
 #ifdef EXT_BLINK_LED
-  #define RED_LED_PIN 5
-  #define YELLOW_LED_PIN 4
+  #define RED_LED_PIN    D15
+  #define YELLOW_LED_PIN D4
 #endif
 
+#define SCK_PIN   SCK
+#define MISO_PIN  MISO
+#define MOSI_PIN  MOSI
+#define SS_PIN    SS
 
 #define NUM_CHANNELS (4)      // Кол-во проверяемых каналов
 #define FIVE_MINUTE  300000    // 5 минут
 #define TWO_MINUTE   120000    // 2 минуты
+#define WAKEUP_TIME  60000     // Время необходимое для просыпания прибора
 
 #define RADIO_BUFFER_LEN 200 // Размер буфера для приема данных от GSM модема
 
@@ -68,7 +75,7 @@ int      BATTERY_MINIMUM  =   VMIN*1023*R2/(R1+R2)/VREF ; //678 3.0V 1023*3.0*27
 #define DEXBRIDGE_PROTO_LEVEL (0x01)
 
 unsigned long dex_tx_id;
-char transmitter_id[] = "6E853";
+char transmitter_id[] = "ABCDE";
 
 IPAddress local_IP(192,168,70,1);
 IPAddress gateway(192,168,70,1);
@@ -77,6 +84,8 @@ IPAddress subnet(255,255,255,0);
 WiFiServer server(80);
 WiFiClient client;
 
+SPIClass SPIclient(VSPI);
+  
 unsigned long web_server_start_time;
 
 unsigned long packet_received = 0;
@@ -98,7 +107,7 @@ byte misses_until_failure = 2;                                                  
 
 byte wifi_wait_tyme = 100; // Время ожидания соединения WiFi в секундах
 byte default_bt_format = 0; // Формат обмена по протколу BlueTooth 0 - None 1 - xDrip, 2 - xBridge
-byte old_bt_format;
+boolean first_start_app = true; // Флаг запуска приложения
 unsigned int battery_milivolts;
 int battery_percent;
 boolean low_battery = false;
@@ -475,24 +484,24 @@ void blink_builtin_led_half() {  // Blink half seconds
 #endif
 
 void WriteReg(char addr, char value) {
-  digitalWrite(SS, LOW);
-  while (digitalRead(MISO) == HIGH) {
+  digitalWrite(SS_PIN, LOW);
+  while (digitalRead(MISO_PIN) == HIGH) {
   };
-  SPI.transfer(addr);
-  SPI.transfer(value);
-  digitalWrite(SS, HIGH);
+  SPIclient.transfer(addr);
+  SPIclient.transfer(value);
+  digitalWrite(SS_PIN, HIGH);
   //  delay(10);
 }
 
 char SendStrobe(char strobe)
 {
-  digitalWrite(SS, LOW);
+  digitalWrite(SS_PIN, LOW);
 
-  while (digitalRead(MISO) == HIGH) {
+  while (digitalRead(MISO_PIN) == HIGH) {
   };
 
-  char result =  SPI.transfer(strobe);
-  digitalWrite(SS, HIGH);
+  char result =  SPIclient.transfer(strobe);
+  digitalWrite(SS_PIN, HIGH);
   //  delay(10);
   return result;
 }
@@ -558,24 +567,24 @@ void init_CC2500() {
 
 char ReadReg(char addr) {
   addr = addr + 0x80;
-  digitalWrite(SS, LOW);
-  while (digitalRead(MISO) == HIGH) {
+  digitalWrite(SS_PIN, LOW);
+  while (digitalRead(MISO_PIN) == HIGH) {
   };
-  SPI.transfer(addr);
-  char y = SPI.transfer(0);
-  digitalWrite(SS, HIGH);
+  SPIclient.transfer(addr);
+  char y = SPIclient.transfer(0);
+  digitalWrite(SS_PIN, HIGH);
   //  delay(10);
   return y;
 }
 
 char ReadStatus(char addr) {
   addr = addr + 0xC0;
-  digitalWrite(SS, LOW);
-  while (digitalRead(MISO) == HIGH) {
+  digitalWrite(SS_PIN, LOW);
+  while (digitalRead(MISO_PIN) == HIGH) {
   };
-  SPI.transfer(addr);
-  char y = SPI.transfer(0);
-  digitalWrite(SS, HIGH);
+  SPIclient.transfer(addr);
+  char y = SPIclient.transfer(0);
+  digitalWrite(SS_PIN, HIGH);
   //  delay(10);
   return y;
 }
@@ -628,7 +637,7 @@ String paramByName(const String& param_string, const String& param_name) {
 
 void handleRoot() {
   char current_id[6];
-  char temp[1400];
+  char temp[1800];
   char chk1[8];
   char chk2[8];
   char chk3[8];
@@ -716,9 +725,13 @@ void handleSave(const String& param_string) {
     settings.bt_format = 2;
     sprintf(bt_frmt,"%s","xBridge");
   }
-  arg1 = paramByName(param_string,"USE_GSM");
-  if (arg1 == "0") settings.use_gsm = 0;
-  else settings.use_gsm = 1;
+  arg1 = paramByName(param_string,"UseGSM");
+#ifdef DEBUG
+  Serial.print("UseGSM = ");
+  Serial.println(arg1);
+#endif      
+  if (arg1 == "YES") settings.use_gsm = 1;
+  else settings.use_gsm = 0;
   arg1 = paramByName(param_string,"APN");
   arg1.toCharArray(settings.gsm_apn,31);
     
@@ -741,8 +754,24 @@ void handleSave(const String& param_string) {
 }
 
 void PrepareWebServer() {
-  WiFi.softAPConfig(local_IP, gateway, subnet);
+/*  
+#ifdef DEBUG
+  if (!ret) {
+    Serial.println("Set IP address error!");    
+  } 
+  else {
+    Serial.print("IP = ");
+    Serial.println(WiFi.softAPIP.toString());
+  }  
+#endif      
+*/
   WiFi.softAP("Parakeet");
+  bool ret = WiFi.softAPConfig(local_IP, gateway, subnet);
+#ifdef DEBUG
+  if (!ret) {
+    Serial.println("Set IP address error!");    
+  } 
+#endif      
   server.begin(); 
   web_server_start_time = millis();   
 }
@@ -977,16 +1006,18 @@ void PrepareBlueTooth() {
 }
 
 void setup() {
+  esp_deep_sleep_wakeup_cause_t wake_up;
 #ifdef DEBUG
   byte b1;
 #endif
 
 #ifdef DEBUG
-  Serial.begin(9600);
+  Serial.begin(115200);
   while (!Serial) {
     ; // wait for serial port to connect. Needed for native USB port only
   }
 #endif
+  pinMode(SS_PIN, OUTPUT);
   pinMode(LEN_PIN, OUTPUT);
   pinMode(GDO0_PIN, INPUT);
   pinMode(BAT_PIN, INPUT);
@@ -1005,27 +1036,51 @@ void setup() {
 #ifdef DEBUG
   Serial.print("Dexcom ID: ");
   Serial.println(dex_tx_id);
+  Serial.print("SCK: ");
+  Serial.println(SCK_PIN);
+  Serial.print("MISO: ");
+  Serial.println(MISO_PIN);
+  Serial.print("MOSI: ");
+  Serial.println(MOSI_PIN);
+  Serial.print("SS: ");
+  Serial.println(SS_PIN);
 #endif
 
-  SPI.begin();
-  //  SPI.setClockDivider(SPI_CLOCK_DIV2);  // max SPI speed, 1/2 F_CLOCK
-  digitalWrite(SS, HIGH);
+  SPIclient.begin(SCK_PIN,MISO_PIN,MOSI_PIN,SS_PIN);
+  SPIclient.setClockDivider(SPI_CLOCK_DIV2);  // max SPI speed, 1/2 F_CLOCK
+  digitalWrite(SS_PIN, HIGH);
+  
+  wake_up = esp_deep_sleep_get_wakeup_cause();
+  if (wake_up == ESP_DEEP_SLEEP_WAKEUP_TIMER) {
+#ifdef DEBUG
+    Serial.println("I'am wake up by timer");      
+#endif
+    first_start_app = false;
+    web_server_start_time = 0;  
+    PrepareBlueTooth();
+    mesure_battery();        
+    delay(WAKEUP_TIME - millis() - 2000); // До следующего сигнала еще долго. Надо подождать.
+  } 
+  else {
+#ifdef DEBUG
+    Serial.println("It's not wake up. It was turn ON!");      
+#endif
+    first_start_app = true;
+    init_CC2500();  // initialise CC2500 registers
+#ifdef DEBUG
+    Serial.print("CC2500 PARTNUM=");
+    b1 = ReadStatus(PARTNUM);
+    Serial.println(b1,HEX);
+    Serial.print("CC2500 VERSION=");
+    b1 = ReadStatus(VERSION);
+    Serial.println(b1,HEX);
+#endif
+    PrepareWebServer();
 
-  init_CC2500();  // initialise CC2500 registers
 #ifdef DEBUG
-  Serial.print("CC2500 PARTNUM=");
-  b1 = ReadStatus(PARTNUM);
-  Serial.println(b1,HEX);
-  Serial.print("CC2500 VERSION=");
-  b1 = ReadStatus(VERSION);
-  Serial.println(b1,HEX);
+    Serial.println("Wait two minutes or configure device!");
 #endif
-  PrepareWebServer();
- 
-  old_bt_format = settings.bt_format;
-#ifdef DEBUG
-  Serial.println("Wait two minutes or configure device!");
-#endif
+  }
 }
 
 void swap_channel(unsigned long channel, byte newFSCTRL0) {
@@ -1241,6 +1296,8 @@ void mesure_battery() {
   Serial.print("Battery Percent = ");
   Serial.println(battery_percent);
 #endif
+  if (battery_percent > 0 && battery_percent < 30) low_battery = true;
+  else low_battery = false;       
 }
 
 byte mesure_temperature() {
@@ -1253,7 +1310,7 @@ byte mesure_temperature() {
   return tp;
 }
 
-void print_packet() {
+boolean print_packet() {
   
   HTTPClient http;
   int httpCode;
@@ -1261,6 +1318,7 @@ void print_packet() {
   byte i;
   String request;
   unsigned long ts;
+  boolean ret = false;
   
 #ifdef DEBUG
   Serial.print(Pkt.len, HEX);
@@ -1295,7 +1353,7 @@ void print_packet() {
 #ifdef DEBUG
     Serial.println("WiFi not configred!");
 #endif
-    return;
+    return ret;
   }
 #ifdef INT_BLINK_LED    
   digitalWrite(LED_BUILTIN, HIGH);
@@ -1316,6 +1374,7 @@ void print_packet() {
     delay(500);
     i++;
     if (i == wifi_wait_tyme*2) break;
+    if (WiFi.status() == WL_NO_SSID_AVAIL) break;
   }
 #ifdef DEBUG
   Serial.println();
@@ -1347,6 +1406,7 @@ void print_packet() {
       Serial.println(httpCode);
 #endif
       if(httpCode == HTTP_CODE_OK) {
+        ret = true;
         response = http.getString();
 #ifdef DEBUG
         Serial.print("RESPONSE = ");
@@ -1390,6 +1450,7 @@ void print_packet() {
 #ifdef EXT_BLINK_LED    
   digitalWrite(RED_LED_PIN, LOW);
 #endif
+  return ret;
 }
 
 void print_bt_packet() {
@@ -1516,6 +1577,28 @@ void HandleWebClient() {
   }  
 }
 
+void esp32_goto_sleep() {
+  unsigned long current_time;
+
+  esp_bluedroid_disable();
+  delay(500);
+  esp_bluedroid_deinit();
+  delay(500);
+  btStop();
+
+#ifdef DEBUG
+  Serial.println("Goto sleep!");
+  Serial.print("Current time = ");
+  Serial.println(millis());
+  Serial.print("Next time = ");
+  Serial.println(next_time);
+#endif
+  current_time = millis();
+  if (next_time - current_time < WAKEUP_TIME) return;
+  esp_deep_sleep(( next_time - current_time - WAKEUP_TIME)*1000);
+  
+}
+
 void loop() {
   unsigned long current_time;
 
@@ -1536,27 +1619,24 @@ void loop() {
 #ifdef DEBUG
       Serial.println("Configuration mode is done!");
 #endif
-      if (old_bt_format != settings.bt_format) {
-        PrepareBlueTooth();
-        delay(500);
-      }
-
+      PrepareBlueTooth();
+      delay(500);
       if (settings.bt_format == 2) {
         sendBeacon();
       } 
-
+      mesure_battery();        
     }
     return;
   }
   
   if (get_packet ())
   {
-    mesure_battery();        
     print_bt_packet();
+    delay(500);
     print_packet ();
-    
-    if (battery_percent > 0 && battery_percent < 30) low_battery = true;
-    else low_battery = false;       
+//  - Отправить пакет по модему, если он не ушел по ВайФай    
   }
-
+  if (next_time > 0) {
+    esp32_goto_sleep();    
+  }
 }

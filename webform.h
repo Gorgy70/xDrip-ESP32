@@ -66,7 +66,7 @@ Parakeet-8266 Settings\
     Use Moble network:\
   </td>\
   <td>\
-    <input type='checkbox' name='USE_GSM' %s>\
+    <input type='checkbox' name='UseGSM' value='YES'%s>\
   </td>\
 </tr>\
 <tr>\
