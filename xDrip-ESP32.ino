@@ -44,12 +44,13 @@ uint8_t temprature_sens_read();
 #define NUM_CHANNELS (4)      // Кол-во проверяемых каналов
 #define FIVE_MINUTE  300000    // 5 минут
 #define TWO_MINUTE   120000    // 2 минуты
+//#define TWO_MINUTE   12000    // 2 минуты
 #define WAKEUP_TIME  45000     // Время необходимое для просыпания прибора
 
 #define RADIO_BUFFER_LEN 200 // Размер буфера для приема данных от GSM модема
 
 // assuming that there is a 10k ohm resistor between BAT+ and BAT_PIN, and a 27k ohm resistor between BAT_PIN and GND
-#define  VREF                 3.48 // Опорное напряжение для аналогового входа
+#define  VREF                 3.3 // Опорное напряжение для аналогового входа
 #define  VMAX                 4.1  // Максимальное напряжение батареи
 #define  VMIN                 3.0  // Минимальное напряжение батареи
 #define  R1                   10   // Резистор делителя напряжения между BAT+ и BAT_PIN (кОм)
@@ -69,7 +70,8 @@ int      BATTERY_MINIMUM  =   VMIN*1023*R2/(R1+R2)/VREF ; //678 3.0V 1023*3.0*27
 #define GATTS_CHAR_UUID_XDRIP        0xFFE1  // UID значения BLE
 #define GATTS_NUM_HANDLE_TEST_ON     4       
 /* maximum value of a characteristic */
-#define GATTS_CHAR_VAL_LEN_MAX 0xFF
+//#define GATTS_CHAR_VAL_LEN_MAX 0xFF
+#define GATTS_CHAR_VAL_LEN_MAX 20
 
 // defines the xBridge protocol functional level.  Sent in each packet as the last byte.
 #define DEXBRIDGE_PROTO_LEVEL (0x01)
@@ -129,11 +131,13 @@ esp_bt_uuid_t ble_descr_uuid;
 // 4 (0100) - Неверный CRC в сохраненных настройках. Берем настройки по умолчанию
 
 /* value range of a attribute (characteristic) */
-uint8_t attr_str[] = {0x00};
+//uint8_t attr_str[] = {0x00};
+uint8_t attr_str[GATTS_CHAR_VAL_LEN_MAX] = {0x00};
 esp_attr_value_t gatts_attr_val =
 {
     .attr_max_len = GATTS_CHAR_VAL_LEN_MAX,
     .attr_len     = sizeof(attr_str),
+//    .attr_len     = 0,
     .attr_value   = attr_str,
 };
 
@@ -880,7 +884,7 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
           Serial.println("Data Acknowledge Packet");
 #endif                
         }
-        if (param->write.len = 0x6 && dexderip_data[0] == 0x2 && dexderip_data[1] == 0x01) {
+        if (param->write.len = 0x6 && dexderip_data[0] == 0x6 && dexderip_data[1] == 0x01) {
           memcpy(&dex_tx_id,&dexderip_data[2],4);
           settings.dex_tx_id = dex_tx_id;
           saveSettingsToFlash();
