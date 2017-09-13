@@ -45,7 +45,9 @@ uint8_t temprature_sens_read();
 #define FIVE_MINUTE  300000    // 5 минут
 #define TWO_MINUTE   120000    // 2 минуты
 //#define TWO_MINUTE   12000    // 2 минуты
-#define WAKEUP_TIME  45000     // Время необходимое для просыпания прибора
+#define LONG_WAKEUP_TIME   45000     // Время необходимое для просыпания прибора если используется BT
+#define SHORT_WAKEUP_TIME   5000      // Время необходимое для просыпания прибора если не используется BT
+#define WAIT_SIGNAL_TIME    3500      // Время на ожидания сигнала с трансмиттера
 
 #define RADIO_BUFFER_LEN 200 // Размер буфера для приема данных от GSM модема
 
@@ -1084,7 +1086,8 @@ void setup() {
     web_server_start_time = 0;  
     PrepareBlueTooth();
     mesure_battery();        
-    delay(WAKEUP_TIME - millis() - 2000); // До следующего сигнала еще долго. Надо подождать.
+    if (settings.bt_format > 0)
+      delay(LONG_WAKEUP_TIME - millis() - WAIT_SIGNAL_TIME); // До следующего сигнала еще долго. Надо подождать.
   } 
   else {
 #ifdef DEBUG
@@ -1604,6 +1607,7 @@ void HandleWebClient() {
 
 void esp32_goto_sleep() {
   unsigned long current_time;
+  long sleep_time;
   esp_bluedroid_status_t stat;
   
   stat = esp_bluedroid_get_status();
@@ -1626,8 +1630,12 @@ void esp32_goto_sleep() {
   Serial.println(next_time);
 #endif
   current_time = millis();
-  if (next_time - current_time < WAKEUP_TIME) return;
-  esp_deep_sleep(( next_time - current_time - WAKEUP_TIME)*1000);
+  if (settings.bt_format == 0)
+    sleep_time = next_time - current_time - SHORT_WAKEUP_TIME;
+  else  
+    sleep_time = next_time - current_time - LONG_WAKEUP_TIME;
+  if (sleep_time > 0) return;
+  esp_deep_sleep(sleep_time*1000);
   
 }
 
