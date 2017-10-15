@@ -1,6 +1,6 @@
 #define DEBUG
-#define INT_BLINK_LED
-//#define EXT_BLINK_LED
+//#define INT_BLINK_LED
+#define EXT_BLINK_LED
 
 
 #include <SPI.h>
@@ -23,42 +23,35 @@ extern "C" {
 uint8_t temprature_sens_read(); 
 }
 
-#define D4         4              
-#define D15        15              
-#define D21        21              
-#define D22        22
-#define D34        34
-#define GDO0_PIN   D22            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
-#define LEN_PIN    D21            // Цифровой канал, к которму подключен контакт LEN (усилитель слабого сигнала) платы CC2500
-#define BAT_PIN    D34            // Аналоговый канал для измерения напряжения питания
+#define GDO0_PIN   19            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
+#define LEN_PIN    17            // Цифровой канал, к которму подключен контакт LEN (усилитель слабого сигнала) платы CC2500
+#define BAT_PIN    34            // Аналоговый канал для измерения напряжения питания
 #ifdef EXT_BLINK_LED
-  #define RED_LED_PIN    D15
-  #define YELLOW_LED_PIN D4
+  #define RED_LED_PIN    25
+  #define YELLOW_LED_PIN 26
 #endif
 
-#define SCK_PIN   SCK
-#define MISO_PIN  MISO
-#define MOSI_PIN  MOSI
-#define SS_PIN    SS
+#define SCK_PIN   22
+#define MISO_PIN  21
+#define MOSI_PIN  23
+#define SS_PIN    5
 
 #define NUM_CHANNELS (4)      // Кол-во проверяемых каналов
 #define FIVE_MINUTE  300000    // 5 минут
 #define TWO_MINUTE   120000    // 2 минуты
-//#define TWO_MINUTE   12000    // 2 минуты
-#define LONG_WAKEUP_TIME   45000     // Время необходимое для просыпания прибора если используется BT
-#define SHORT_WAKEUP_TIME   5000      // Время необходимое для просыпания прибора если не используется BT
-#define WAIT_SIGNAL_TIME    3500      // Время на ожидания сигнала с трансмиттера
+#define WAKEUP_TIME  45000     // Время необходимое для просыпания прибора
 
 #define RADIO_BUFFER_LEN 200 // Размер буфера для приема данных от GSM модема
 
 // assuming that there is a 10k ohm resistor between BAT+ and BAT_PIN, and a 27k ohm resistor between BAT_PIN and GND
 #define  VREF                 3.3 // Опорное напряжение для аналогового входа
-#define  VMAX                 4.1  // Максимальное напряжение батареи
+#define  VMAX                 4.2  // Максимальное напряжение батареи
 #define  VMIN                 3.0  // Минимальное напряжение батареи
 #define  R1                   10   // Резистор делителя напряжения между BAT+ и BAT_PIN (кОм)
 #define  R2                   27   // Резистор делителя напряжения между BAT_PIN и GND (кОм)
-int      BATTERY_MAXIMUM  =   VMAX*1023*R2/(R1+R2)/VREF ; //950 4.2V 1023*4.2*27(27+10)/3.3
-int      BATTERY_MINIMUM  =   VMIN*1023*R2/(R1+R2)/VREF ; //678 3.0V 1023*3.0*27/(27+10)/3.3
+#define  ANALOG_RESOLUTION    4095 // Масимальное значение на аналоговом входе. Ио умолчанию 12 бит 
+int      BATTERY_MAXIMUM  =   VMAX*ANALOG_RESOLUTION*R2/(R1+R2)/VREF ; //950 4.2V 1023*4.2*27(27+10)/3.3
+int      BATTERY_MINIMUM  =   VMIN*ANALOG_RESOLUTION*R2/(R1+R2)/VREF ; //678 3.0V 1023*3.0*27/(27+10)/3.3
 
 #define my_webservice_url    "http://parakeet.esen.ru/receiver.cgi"
 #define my_webservice_reply  "!ACK"
@@ -72,8 +65,7 @@ int      BATTERY_MINIMUM  =   VMIN*1023*R2/(R1+R2)/VREF ; //678 3.0V 1023*3.0*27
 #define GATTS_CHAR_UUID_XDRIP        0xFFE1  // UID значения BLE
 #define GATTS_NUM_HANDLE_TEST_ON     4       
 /* maximum value of a characteristic */
-//#define GATTS_CHAR_VAL_LEN_MAX 0xFF
-#define GATTS_CHAR_VAL_LEN_MAX 20
+#define GATTS_CHAR_VAL_LEN_MAX 0xFF
 
 // defines the xBridge protocol functional level.  Sent in each packet as the last byte.
 #define DEXBRIDGE_PROTO_LEVEL (0x01)
@@ -133,13 +125,11 @@ esp_bt_uuid_t ble_descr_uuid;
 // 4 (0100) - Неверный CRC в сохраненных настройках. Берем настройки по умолчанию
 
 /* value range of a attribute (characteristic) */
-//uint8_t attr_str[] = {0x00};
-uint8_t attr_str[GATTS_CHAR_VAL_LEN_MAX] = {0x00};
+uint8_t attr_str[] = {0x00};
 esp_attr_value_t gatts_attr_val =
 {
     .attr_max_len = GATTS_CHAR_VAL_LEN_MAX,
     .attr_len     = sizeof(attr_str),
-//    .attr_len     = 0,
     .attr_value   = attr_str,
 };
 
@@ -1033,6 +1023,7 @@ void PrepareBlueTooth() {
 }
 
 void setup() {
+    
   esp_deep_sleep_wakeup_cause_t wake_up;
 #ifdef DEBUG
   byte b1;
@@ -1044,6 +1035,7 @@ void setup() {
     ; // wait for serial port to connect. Needed for native USB port only
   }
 #endif
+
   pinMode(SS_PIN, OUTPUT);
   pinMode(LEN_PIN, OUTPUT);
   pinMode(GDO0_PIN, INPUT);
@@ -1086,8 +1078,7 @@ void setup() {
     web_server_start_time = 0;  
     PrepareBlueTooth();
     mesure_battery();        
-    if (settings.bt_format > 0)
-      delay(LONG_WAKEUP_TIME - millis() - WAIT_SIGNAL_TIME); // До следующего сигнала еще долго. Надо подождать.
+    delay(WAKEUP_TIME - millis() - 8000); // До следующего сигнала еще долго. Надо подождать.
   } 
   else {
 #ifdef DEBUG
@@ -1306,7 +1297,7 @@ void mesure_battery() {
 
   val = analogRead(BAT_PIN);
 //  val = adc.read(0)  ;
-  battery_milivolts = 1000*VREF*val/1023;
+  battery_milivolts = 1000*VREF*val/ANALOG_RESOLUTION;
 #ifdef DEBUG
   Serial.print("Analog Read = ");
   Serial.println(val);
@@ -1607,7 +1598,6 @@ void HandleWebClient() {
 
 void esp32_goto_sleep() {
   unsigned long current_time;
-  long sleep_time;
   esp_bluedroid_status_t stat;
   
   stat = esp_bluedroid_get_status();
@@ -1630,12 +1620,8 @@ void esp32_goto_sleep() {
   Serial.println(next_time);
 #endif
   current_time = millis();
-  if (settings.bt_format == 0)
-    sleep_time = next_time - current_time - SHORT_WAKEUP_TIME;
-  else  
-    sleep_time = next_time - current_time - LONG_WAKEUP_TIME;
-  if (sleep_time > 0) return;
-  esp_deep_sleep(sleep_time*1000);
+  if (next_time - current_time < WAKEUP_TIME) return;
+  esp_deep_sleep(( next_time - current_time - WAKEUP_TIME)*1000);
   
 }
 
@@ -1673,7 +1659,10 @@ void loop() {
     print_packet ();
 //  - Отправить пакет по модему, если он не ушел по ВайФай    
   } 
-  else sendBeacon();
+  else {
+    sendBeacon();
+    mesure_battery();
+  }
   
   if (next_time > 0) {
     esp32_goto_sleep();    
