@@ -1,3 +1,4 @@
+
 #define DEBUG
 //#define INT_BLINK_LED
 #define EXT_BLINK_LED
@@ -29,8 +30,10 @@ uint8_t temprature_sens_read();
 #define LEN_PIN    5             // Цифровой канал, к которму подключен контакт LEN (усилитель слабого сигнала) платы CC2500 (Предыдущее значение 17).
 #define BAT_PIN    34            // Аналоговый канал для измерения напряжения питания
 #ifdef EXT_BLINK_LED
-  #define RED_LED_PIN    25
-  #define YELLOW_LED_PIN 26
+//  #define RED_LED_PIN    25
+//  #define YELLOW_LED_PIN 26
+  #define RED_LED_PIN    16
+  #define YELLOW_LED_PIN 17
 #endif
 
 #define SCK_PIN   22
@@ -39,8 +42,10 @@ uint8_t temprature_sens_read();
 #define SS_PIN    18 // Предыдущее значение 5
 #ifdef GSM_MODEM
 // Выводы IO16 и IO17 используются в HardwareSerial2
-  #define RX_PIN  16
-  #define TX_PIN  17
+//  #define RX_PIN  16
+//  #define TX_PIN  17
+  #define RX_PIN  25
+  #define TX_PIN  26
   #define DTR_PIN 13
 #endif
 
@@ -1483,7 +1488,8 @@ void setup() {
   pinMode(BAT_PIN, INPUT);
 #ifdef GSM_MODEM
   pinMode(DTR_PIN, OUTPUT);
-  mySerial.begin(9600);
+//  mySerial.begin(9600);
+  mySerial.begin(9600,SERIAL_8N1,RX_PIN,TX_PIN);
 #endif
   
   // initialize digital pin LED_BUILTIN as an output.
