@@ -47,6 +47,7 @@ uint8_t temprature_sens_read();
   #define RX_PIN  25
   #define TX_PIN  26
   #define DTR_PIN 13
+  #define RST_PIN 27
 #endif
 
 #define NUM_CHANNELS        (4)       // Кол-во проверяемых каналов
@@ -1499,6 +1500,8 @@ void setup() {
   pinMode(BAT_PIN, INPUT);
 #ifdef GSM_MODEM
   pinMode(DTR_PIN, OUTPUT);
+  pinMode(RST_PIN, OUTPUT);
+  digitalWrite(RST_PIN, HIGH);
 //  mySerial.begin(9600);
   mySerial.begin(9600,SERIAL_8N1,RX_PIN,TX_PIN);
 #endif
