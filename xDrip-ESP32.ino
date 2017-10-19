@@ -98,6 +98,7 @@ WiFiClient client;
 SPIClass SPIclient(VSPI);
 
 #ifdef GSM_MODEM
+  #define ERROR_STR "ERROR"
 //  SoftwareSerial mySerial(RX_PIN, TX_PIN); // RX, TX
   HardwareSerial mySerial(2);
 #endif
@@ -1056,10 +1057,11 @@ void PrepareBlueTooth() {
 }
 
 #ifdef GSM_MODEM
-boolean gsm_command(const char *command, const char *response, int timeout) {
+boolean gsm_command(const char *command, const char *response, int timeout, boolean break_on_error) {
   boolean ret;
   unsigned long timeout_time; 
   int len = strlen (response);
+  int len_error = strlen(ERROR_STR);
   int loop = 0;
 
 #ifdef INT_BLINK_LED  
@@ -1096,6 +1098,7 @@ boolean gsm_command(const char *command, const char *response, int timeout) {
           delay(100);
         }
       }  
+      if (break_on_error && loop >= len_error && strncmp(ERROR_STR,&SerialBuffer[loop-len_error],len_error) == 0) break;
     } 
     else {
       if (ret) {
@@ -1105,6 +1108,10 @@ boolean gsm_command(const char *command, const char *response, int timeout) {
     }
   }
   SerialBuffer[loop] = '\0';
+  while (mySerial.available()) {
+    delayMicroseconds(100);
+    mySerial.read();
+  }
 #ifdef DEBUG
   Serial.print("Cmd=");
   Serial.println(command);
@@ -1122,6 +1129,10 @@ boolean gsm_command(const char *command, const char *response, int timeout) {
   digitalWrite(RED_LED_PIN, LOW);
 #endif
   return ret;
+}
+
+boolean gsm_command(const char *command, const char *response, int timeout) {
+  gsm_command(command,response,timeout,true);
 }
 
 boolean set_gprs_profile() {
