@@ -27,9 +27,11 @@ https://www.aliexpress.com/item/Free-Shipping-Hot-Sale-Smart-Electronics-Integra
 <br>
 <b>Установка поддержки ESP-32 в Arduino Studio:</b><br>
 <br>
-https://github.com/espressif/arduino-esp32/blob/master/docs/arduino-ide/windows.md
+https://github.com/espressif/arduino-esp32/blob/master/docs/arduino-ide/windows.md<br>
 <br>
 <b>Загрузка прошивки в контроллер</b><br>
+<br>
 Для загрузки прошивки в контроллер необходимо подключить к плате адаптер USB-TTL используя контакты для программирования<br>
 Чтобы активировать режим прошивки контроллера необходимо замкнуть контакт IO0 контроллера на землю и перегрузить контроллер кратковременным замыканием контакта EN на землю.<br>
 Если не удается загрузит прошивку на скорости 921600 - попробуйте понизить скорость до 115200.<br>
+После удачной загрузки прошивки убрать перемычку с контакта IO0 на землю и перегрузить контроллер.<br>
