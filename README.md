@@ -23,8 +23,9 @@ https://www.aliexpress.com/item/CC2500-PA-LNA-Romote-Wireless-Module-CC2500-SI44
 5. Стаблизатор, для понижения напряжения до 3.3В:
 https://www.aliexpress.com/item/Free-Shipping-Hot-Sale-Smart-Electronics-Integrated-Circuit-AP7361-15FGE-7-IC-REG-LDO-1-5V/32584383940.html?spm=a2g0s.9042311.0.0.ZQhor8
 <br>
-6. Светодиоды, резисторы и конденсаторы в соответствии с печатной платой.
-<b>Установка поодержки ESP-32 в Arduino Studio:</b><br>
+6. Светодиоды, резисторы и конденсаторы в соответствии с печатной платой.<br>
+<br>
+<b>Установка поддержки ESP-32 в Arduino Studio:</b><br>
 <br>
 https://github.com/espressif/arduino-esp32/blob/master/docs/arduino-ide/windows.md
 <br>
