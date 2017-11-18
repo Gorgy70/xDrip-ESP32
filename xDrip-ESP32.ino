@@ -2,7 +2,7 @@
 #define DEBUG
 //#define INT_BLINK_LED
 #define EXT_BLINK_LED
-#define GSM_MODEM
+//#define GSM_MODEM
 #define MODEM_SLEEP_DTR
 
 
@@ -54,7 +54,7 @@ uint8_t temprature_sens_read();
 #define FIVE_MINUTE         300000    // 5 минут
 #define TWO_MINUTE          120000    // 2 минуты
 #define WAKEUP_BT_TIME      45000     // Время необходимое для просыпания прибора c BT
-#define WAKEUP_NON_BT_TIME  8000      // Время необходимое для просыпания прибора без BT
+#define WAKEUP_NON_BT_TIME  3000      // Время необходимое для просыпания прибора без BT
 
 #define RADIO_BUFFER_LEN 200 // Размер буфера для приема данных от радиомодуля
 #ifdef GSM_MODEM
@@ -571,7 +571,8 @@ void init_CC2500() {
    // 300 khz is supposedly what dex uses...
    //0x6a = 271 khz
    //0x7a = 232 khz
-   WriteReg(MDMCFG4, 0x7a); //appear to get better sensitivity
+//   WriteReg(MDMCFG4, 0x7a); //appear to get better sensitivity
+   WriteReg(MDMCFG4, 0x6a);
    WriteReg(MDMCFG3, 0xf8);
    WriteReg(MDMCFG2, 0x73);
    WriteReg(MDMCFG1, 0x23);
@@ -802,13 +803,22 @@ void PrepareWebServer() {
 #endif      
 */
   WiFi.softAP("Parakeet");
+#ifdef DEBUG
+  Serial.println("Set SSID Name Done!");    
+#endif      
   bool ret = WiFi.softAPConfig(local_IP, gateway, subnet);
 #ifdef DEBUG
   if (!ret) {
     Serial.println("Set IP address error!");    
   } 
+  else {
+    Serial.println("Set IPAddress Done!");    
+  }
 #endif      
   server.begin(); 
+#ifdef DEBUG
+  Serial.println("Server start OK!");    
+#endif      
   web_server_start_time = millis();   
 }
 
@@ -1643,6 +1653,7 @@ boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
   boolean nRet = false;
   boolean packet_on_board;
   byte packet_len;
+  byte frequest;
 
   start_time = millis();
   swap_channel(nChannels[channel_index], fOffset[channel_index]);
@@ -1657,8 +1668,11 @@ boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
 #endif
   current_time = 0;
   digitalWrite(LEN_PIN, HIGH); // Включаем усилитель слабого сигнала
+  noInterrupts(); // Отключим прерывания
   while (true) {
 //    ESP.wdtFeed();
+//    delayMicroseconds(100);
+    delay(1);
     current_time = millis();
     if (milliseconds_wait != 0 && current_time - start_time > milliseconds_wait) {
       break; // Если превысыли время ожидания на канале - выход
@@ -1685,10 +1699,12 @@ boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
     }  
 #endif
     packet_on_board = false;
+//    noInterrupts(); // Отключим прерывания
     while (digitalRead(GDO0_PIN) == HIGH) {
       packet_on_board = true;
       // Идет прием пакета
     }
+//    interrupts(); // Включаем прерывания
     if (packet_on_board) {
       packet_len = ReadRadioBuffer();
       if (Pkt.src_addr == dex_tx_id) {
@@ -1703,7 +1719,9 @@ boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
           Serial.println("unkn");
         }
 #endif
-        fOffset[channel_index] += ReadStatus(FREQEST);
+        frequest = ReadStatus(FREQEST);
+//        fOffset[channel_index] += ;
+        fOffset[channel_index] = frequest;
         catch_time = current_time - 500 * channel_index; // Приводим к каналу 0
         nRet = true;
       } 
@@ -1722,6 +1740,7 @@ boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
       }
     }
   }
+  interrupts(); // Включаем прерывания
   digitalWrite(LEN_PIN, LOW); // Выключаем усилитель слабого сигнала
 
 #ifdef INT_BLINK_LED
@@ -1766,7 +1785,6 @@ boolean get_packet (void) {
   }
   SendStrobe(SIDLE);
   SendStrobe(SFRX);
-
   return nRet;
 }
 
