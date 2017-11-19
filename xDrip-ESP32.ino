@@ -30,8 +30,6 @@ uint8_t temprature_sens_read();
 #define LEN_PIN    5             // Цифровой канал, к которму подключен контакт LEN (усилитель слабого сигнала) платы CC2500 (Предыдущее значение 17).
 #define BAT_PIN    34            // Аналоговый канал для измерения напряжения питания
 #ifdef EXT_BLINK_LED
-//  #define RED_LED_PIN    25
-//  #define YELLOW_LED_PIN 26
   #define RED_LED_PIN    16
   #define YELLOW_LED_PIN 17
 #endif
@@ -112,6 +110,11 @@ SPIClass SPIclient(VSPI);
 unsigned long web_server_start_time;
 
 unsigned long packet_received = 0;
+unsigned long cc2500_start_time;
+int current_channel;
+boolean packet_catched;
+boolean len_pin_low;
+volatile byte gdo0_status;
 
 byte fOffset[NUM_CHANNELS] = { 0xE4, 0xE3, 0xE2, 0xE2 };
 byte nChannels[NUM_CHANNELS] = { 0, 100, 199, 209 };
@@ -1588,6 +1591,11 @@ void setup() {
     Serial.println("Wait two minutes or configure device!");
 #endif
   }
+  current_channel = -1;
+  packet_catched = false;
+  len_pin_low = true;
+  gdo0_status = 0;
+  attachInterrupt(digitalPinToInterrupt(GDO0_PIN),gdo0_pin_up , RISING);
 }
 
 void swap_channel(unsigned long channel, byte newFSCTRL0) {
@@ -1644,148 +1652,6 @@ byte ReadRadioBuffer() {
   Serial.println(Pkt.src_addr);
 #endif
   return len;
-}
-
-boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
-{
-  unsigned long start_time;
-  unsigned long current_time;
-  boolean nRet = false;
-  boolean packet_on_board;
-  byte packet_len;
-  byte frequest;
-
-  start_time = millis();
-  swap_channel(nChannels[channel_index], fOffset[channel_index]);
-
-#ifdef DEBUG
-  Serial.print("Chanel = ");
-  Serial.print(nChannels[channel_index]);
-  Serial.print(" Time = ");
-  Serial.print(start_time);
-  Serial.print(" Next Time = ");
-  Serial.println(next_time);
-#endif
-  current_time = 0;
-  digitalWrite(LEN_PIN, HIGH); // Включаем усилитель слабого сигнала
-  noInterrupts(); // Отключим прерывания
-  while (true) {
-//    ESP.wdtFeed();
-//    delayMicroseconds(100);
-    delay(1);
-    current_time = millis();
-    if (milliseconds_wait != 0 && current_time - start_time > milliseconds_wait) {
-      break; // Если превысыли время ожидания на канале - выход
-    }
-    if (channel_index == 0 && next_time != 0 && current_time > (next_time + wait_after_time)) {
-      break; // Если превысыли время следующего пакета на канале 0 - выход
-    }
-#ifdef INT_BLINK_LED
-    blink_builtin_led_quarter();
-#endif
-#ifdef EXT_BLINK_LED
-    if (dex_tx_id == 10858926 || dex_tx_id == 0)   // ABCDE
-    {
-      blink_yellow_led_half();
-      if (low_battery) {
-        blink_red_led_half2();
-      }
-    } else
-    {
-      blink_yellow_led_quarter();
-      if (low_battery) {
-        blink_red_led_quarter2();
-      }
-    }  
-#endif
-    packet_on_board = false;
-//    noInterrupts(); // Отключим прерывания
-    while (digitalRead(GDO0_PIN) == HIGH) {
-      packet_on_board = true;
-      // Идет прием пакета
-    }
-//    interrupts(); // Включаем прерывания
-    if (packet_on_board) {
-      packet_len = ReadRadioBuffer();
-      if (Pkt.src_addr == dex_tx_id) {
-#ifdef DEBUG
-        Serial.print("Catched.Ch=");
-        Serial.print(nChannels[channel_index]);
-        Serial.print(" Int=");
-        if (catch_time != 0) {
-          Serial.println(current_time - 500 * channel_index - catch_time);
-        }
-        else {
-          Serial.println("unkn");
-        }
-#endif
-        frequest = ReadStatus(FREQEST);
-//        fOffset[channel_index] += ;
-        fOffset[channel_index] = frequest;
-        catch_time = current_time - 500 * channel_index; // Приводим к каналу 0
-        nRet = true;
-      } 
-//      if (next_time != 0 && !nRet && channel_index == 0 && current_time < next_time && next_time-current_time < 2000) {
-      if (next_time != 0 && !nRet && packet_len != 0) {
-#ifdef DEBUG
-        Serial.print("Try.Ch=");
-        Serial.print(nChannels[channel_index]);
-        Serial.print(" Time=");
-        Serial.println(current_time);
-#endif
-        swap_channel(nChannels[channel_index], fOffset[channel_index]);
-      }
-      else {
-        break;
-      }
-    }
-  }
-  interrupts(); // Включаем прерывания
-  digitalWrite(LEN_PIN, LOW); // Выключаем усилитель слабого сигнала
-
-#ifdef INT_BLINK_LED
-  digitalWrite(LED_BUILTIN, LOW);
-#endif
-#ifdef EXT_BLINK_LED
-  digitalWrite(YELLOW_LED_PIN, LOW);
-  digitalWrite(RED_LED_PIN, LOW);
-#endif
-  return nRet;
-}
-
-boolean get_packet (void) {
-  byte nChannel;
-  boolean nRet;
-
-  nRet = false;
-  for (nChannel = 0; nChannel < NUM_CHANNELS; nChannel++)
-  {
-    if (WaitForPacket (waitTimes[nChannel], nChannel)) {
-      nRet = true;
-      break;
-    }
-  }
-  if (!nRet) {
-    sequential_missed_packets++;
-#ifdef DEBUG
-    Serial.print("Missed-");
-    Serial.println(sequential_missed_packets);
-#endif
-    if (sequential_missed_packets > misses_until_failure) { // Кол-во непойманных пакетов превысило заданное кол-во. Будем ловить пакеты непрерывно
-      next_time = 0;
-      sequential_missed_packets = 0; // Сбрасываем счетчик непойманных пакетов
-    }  
-  }
-  else {
-    next_time = catch_time; 
-  }
-
-  if (next_time != 0) {
-    next_time += FIVE_MINUTE;
-  }
-  SendStrobe(SIDLE);
-  SendStrobe(SFRX);
-  return nRet;
 }
 
 void mesure_battery() {
@@ -2147,6 +2013,9 @@ void esp32_goto_sleep() {
 
 void loop() {
   unsigned long current_time;
+  boolean packet_on_board;
+  int old_channel;
+  byte packet_len;
 
 // Первые две минуты работает WebServer на адресе 192.168.70.1 для конфигурации устройства
   if (web_server_start_time > 0) {
@@ -2180,8 +2049,104 @@ void loop() {
     }
     return;
   }
+
+// Ловим сигнал от Декскома
+  delay(1);
+  current_time = millis();
+
+  if (len_pin_low) {
+    digitalWrite(LEN_PIN, HIGH); // Включаем усилитель слабого сигнала
+    len_pin_low = false;
+  } // Включаем усилитель слабого сигнала  
+
+  old_channel = current_channel;
+  if (current_channel < 0) {
+    current_channel = 0;
+  }
+  if (current_channel > 0 && current_time - cc2500_start_time > waitTimes[current_channel]) {
+    current_channel++;
+    if (current_channel > 3) current_channel = 0;
+  }  
+
+  if (current_channel != old_channel) {  
+    cc2500_start_time = current_time;
+    swap_channel(nChannels[current_channel], fOffset[current_channel]);
+#ifdef DEBUG
+    Serial.print("Chanel = ");
+    Serial.print(nChannels[current_channel]);
+    Serial.print(" Time = ");
+    Serial.println(cc2500_start_time);
+#endif
+  }
+   
+#ifdef INT_BLINK_LED
+  blink_builtin_led_quarter();
+#endif
+#ifdef EXT_BLINK_LED
+  if (dex_tx_id == 10858926 || dex_tx_id == 0)   // ABCDE
+  {
+    blink_yellow_led_half();
+    if (low_battery) {
+      blink_red_led_half2();
+    }
+  } else
+  {
+    blink_yellow_led_quarter();
+    if (low_battery) {
+      blink_red_led_quarter2();
+    }
+  }  
+#endif
+  packet_on_board = gdo0_status;
+  if (packet_on_board) {
+    while (digitalRead(GDO0_PIN) == HIGH) {
+    // Идет прием пакета
+    }
+  }
   
-  if (get_packet ())
+  if (!packet_on_board) return; // Нет сигнала от декскома - выходим из цикла
+
+#ifdef INT_BLINK_LED
+  digitalWrite(LED_BUILTIN, LOW);
+#endif
+#ifdef EXT_BLINK_LED
+  digitalWrite(YELLOW_LED_PIN, LOW);
+  digitalWrite(RED_LED_PIN, LOW);
+#endif
+
+  packet_len = ReadRadioBuffer();
+  if (Pkt.src_addr == dex_tx_id) {
+#ifdef DEBUG
+    Serial.print("Catched.Ch=");
+    Serial.println(nChannels[current_channel]);
+    Serial.print("gdo0_status = ");
+    Serial.println(gdo0_status);
+#endif
+    fOffset[current_channel] += ReadStatus(FREQEST);
+    catch_time = current_time - 500 * current_channel; // Приводим к каналу 0
+    next_time = catch_time + FIVE_MINUTE;
+    packet_catched = true;
+    digitalWrite(LEN_PIN, LOW); // Выключаем усилитель слабого сигнала
+    SendStrobe(SIDLE);  // Переводим приемник в режим ожидания
+    SendStrobe(SFRX);  // Очищаем буфер вхоядщих данных
+  } 
+  else {
+    current_channel++;
+    if (current_channel > 3) current_channel = 0;
+    cc2500_start_time = current_time;
+    swap_channel(nChannels[current_channel], fOffset[current_channel]);
+#ifdef DEBUG
+    Serial.print("Chanel = ");
+    Serial.print(nChannels[current_channel]);
+    Serial.print(" Time = ");
+    Serial.println(cc2500_start_time);
+    Serial.print("gdo0_status = ");
+    Serial.println(gdo0_status);
+#endif
+  }
+  gdo0_status = 0;
+  
+  if (packet_catched)
   {
     mesure_battery();
     print_bt_packet();
@@ -2201,7 +2166,7 @@ void loop() {
     }
 //  - Отправить пакет по модему, если он не ушел по ВайФай    
   } 
-  else {
+  else if (current_channel == 0) {
     sendBeacon();
     mesure_battery();
   }
@@ -2215,7 +2180,12 @@ void loop() {
   }  
 #endif
   
-  if (next_time > 0) {
+  if (packet_catched) {
     esp32_goto_sleep();    
   }
 }
+
+void gdo0_pin_up() {
+  gdo0_status = 1;  
+}
+
