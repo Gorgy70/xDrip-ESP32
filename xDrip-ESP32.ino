@@ -558,7 +558,9 @@ void init_CC2500() {
    WriteReg(ADDR, 0x00);
    WriteReg(CHANNR, 0x00);
 
-   WriteReg(FSCTRL1, 0x0f); 
+//   WriteReg(FSCTRL1, 0x0A); 
+//   WriteReg(FSCTRL1, 0x0f);  // Intermediate Freq.  Fif = FRef x FREQ_IF / 2^10 = 24000000 * 10/1024 = 234375  for 0x0F = 351562.5
+   WriteReg(FSCTRL1, 0x09);  // Intermediate Freq.  Fif = FRef x FREQ_IF / 2^10 = 26000000 * 9/1024 = 228515,625  for 0x0F = 380859,375
    WriteReg(FSCTRL0, 0x00);  
   
    WriteReg(FREQ2, 0x5d);
@@ -575,18 +577,19 @@ void init_CC2500() {
    //0x6a = 271 khz
    //0x7a = 232 khz
 //   WriteReg(MDMCFG4, 0x7a); //appear to get better sensitivity
-   WriteReg(MDMCFG4, 0x6a);
+   WriteReg(MDMCFG4, 0x5a); //  Rx Filter BW
    WriteReg(MDMCFG3, 0xf8);
    WriteReg(MDMCFG2, 0x73);
    WriteReg(MDMCFG1, 0x23);
    WriteReg(MDMCFG0, 0x3b);
    
-   WriteReg(DEVIATN, 0x40);
+//   WriteReg(DEVIATN, 0x40);
+   WriteReg(DEVIATN, 0x00);
 
    WriteReg(MCSM2, 0x07);
    WriteReg(MCSM1, 0x30);
    WriteReg(MCSM0, 0x18);  
-   WriteReg(FOCCFG, 0x16); //36
+//   WriteReg(FOCCFG, 0x16); //36
    WriteReg(FSCAL3, 0xa9);
    WriteReg(FSCAL2, 0x0a);
    WriteReg(FSCAL1, 0x00);
@@ -600,7 +603,8 @@ void init_CC2500() {
    WriteReg(TEST1, 0x35); 
    WriteReg(TEST0, 0x0b);  
    
-   WriteReg(FOCCFG, 0x0A);    // allow range of +/1 FChan/4 = 375000/4 = 93750.  No CS GATE
+//   WriteReg(FOCCFG, 0x0A);    // allow range of +/1 FChan/4 = 375000/4 = 93750.  No CS GATE
+   WriteReg(FOCCFG, 0x2A);    // allow range of +/1 FChan/4 = 375000/4 = 93750.  No CS GATE
    WriteReg(BSCFG, 0x6C);
  
 }
@@ -2016,6 +2020,7 @@ void loop() {
   boolean packet_on_board;
   int old_channel;
   byte packet_len;
+  uint8_t freqest;
 
 // Первые две минуты работает WebServer на адресе 192.168.70.1 для конфигурации устройства
   if (web_server_start_time > 0) {
@@ -2052,6 +2057,7 @@ void loop() {
 
 // Ловим сигнал от Декскома
   delay(1);
+  
   current_time = millis();
 
   if (len_pin_low) {
@@ -2122,7 +2128,13 @@ void loop() {
     Serial.print("gdo0_status = ");
     Serial.println(gdo0_status);
 #endif
-    fOffset[current_channel] += ReadStatus(FREQEST);
+    frequest = ReadStatus(FREQEST);
+    fOffset[current_channel] += frequest;
+//    fOffset[current_channel] = frequest;
+#ifdef DEBUG
+    Serial.print("Offset:");
+    Serial.println(fOffset[channel], HEX);
+#endif
     catch_time = current_time - 500 * current_channel; // Приводим к каналу 0
     next_time = catch_time + FIVE_MINUTE;
     packet_catched = true;
