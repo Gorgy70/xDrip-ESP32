@@ -4,6 +4,8 @@
 #define EXT_BLINK_LED
 //#define GSM_MODEM
 #define MODEM_SLEEP_DTR
+#define PCB_V1
+//#define PCB_V2
 
 
 #include <SPI.h>
@@ -39,12 +41,14 @@ uint8_t temprature_sens_read();
 #define MOSI_PIN  23
 #define SS_PIN    18 // Предыдущее значение 5
 #ifdef GSM_MODEM
-// Выводы IO16 и IO17 используются в HardwareSerial2
-//  #define RX_PIN  16
-//  #define TX_PIN  17
   #define RX_PIN  25
   #define TX_PIN  26
+#ifdef PCB_V1
   #define DTR_PIN 13
+#endif
+#ifdef PCB_V2
+  #define DTR_PIN 14
+#endif
   #define RST_PIN 27
 #endif
 
@@ -354,6 +358,34 @@ unsigned long checksum_settings()
     chk++;
   }
   return chk;
+}
+
+void saveOffsetToFlash()
+{ 
+  byte i;
+  int start_pos;
+
+  EEPROM.begin(4);
+  start_pos = sizeof(parakeet_settings);
+  for (i = 0; i < 4; i++)
+  {
+    EEPROM.write(start_pos+i,fOffset[i]);
+  }
+  EEPROM.commit();
+}
+
+void loadOffsetFromFlash()
+{ 
+  byte i;
+  int start_pos;
+
+  EEPROM.begin(4);
+  start_pos = sizeof(parakeet_settings);
+  for (i = 0; i < 4; i++)
+  {
+    fOffset[i] = EEPROM.read(start_pos+i);
+  }
+  
 }
 
 void saveSettingsToFlash()
@@ -1573,7 +1605,8 @@ void setup() {
     else {
       wake_up_time = WAKEUP_NON_BT_TIME;      
     }
-    mesure_battery();        
+    mesure_battery();   
+    loadOffsetFromFlash(); // Считываем текущие смещения частоты и постояной памяти
   } 
   else {
 #ifdef DEBUG
@@ -1589,6 +1622,7 @@ void setup() {
     b1 = ReadStatus(VERSION);
     Serial.println(b1,HEX);
 #endif
+    saveOffsetToFlash(); // Сохраняем смещения частоты по умолчанию в постоянной памяти
     PrepareWebServer();
 
 #ifdef DEBUG
@@ -1606,7 +1640,7 @@ void swap_channel(unsigned long channel, byte newFSCTRL0) {
 
   SendStrobe(SIDLE);
   SendStrobe(SFRX);
-//  WriteReg(FSCTRL0,newFSCTRL0);
+  WriteReg(FSCTRL0,newFSCTRL0);
   WriteReg(CHANNR, channel);
   SendStrobe(SRX);  //RX
   while (ReadStatus(MARCSTATE) != 0x0d) {
@@ -2128,12 +2162,13 @@ void loop() {
     Serial.print("gdo0_status = ");
     Serial.println(gdo0_status);
 #endif
-    frequest = ReadStatus(FREQEST);
-    fOffset[current_channel] += frequest;
-//    fOffset[current_channel] = frequest;
+    freqest = ReadStatus(FREQEST);
+//    fOffset[current_channel] += freqest;
+    fOffset[current_channel] = freqest;
+    saveOffsetToFlash(); // Сохраняем смещения частоты по умолчанию в постоянной памяти
 #ifdef DEBUG
     Serial.print("Offset:");
-    Serial.println(fOffset[channel], HEX);
+    Serial.println(fOffset[current_channel], HEX);
 #endif
     catch_time = current_time - 500 * current_channel; // Приводим к каналу 0
     next_time = catch_time + FIVE_MINUTE;
