@@ -67,7 +67,7 @@ uint8_t temprature_sens_read();
 
 // assuming that there is a 10k ohm resistor between BAT+ and BAT_PIN, and a 27k ohm resistor between BAT_PIN and GND
 #define  VREF                 3.3 // Опорное напряжение для аналогового входа
-#define  VMAX                 4.2  // Максимальное напряжение батареи
+#define  VMAX                 4.1  // Максимальное напряжение батареи
 #define  VMIN                 3.0  // Минимальное напряжение батареи
 #define  R1                   10   // Резистор делителя напряжения между BAT+ и BAT_PIN (кОм)
 #define  R2                   27   // Резистор делителя напряжения между BAT_PIN и GND (кОм)
@@ -120,7 +120,8 @@ boolean packet_catched;
 boolean len_pin_low;
 volatile byte gdo0_status;
 
-byte fOffset[NUM_CHANNELS] = { 0xE4, 0xE3, 0xE2, 0xE2 };
+//byte fOffset[NUM_CHANNELS] = { 0xE4, 0xE3, 0xE2, 0xE2 };
+byte fOffset[NUM_CHANNELS] = { 0x00, 0x00, 0x00, 0x00 };
 byte nChannels[NUM_CHANNELS] = { 0, 100, 199, 209 };
 unsigned long waitTimes[NUM_CHANNELS] = { 0, 600, 600, 600 };
 
@@ -365,11 +366,12 @@ void saveOffsetToFlash()
   byte i;
   int start_pos;
 
-  EEPROM.begin(4);
   start_pos = sizeof(parakeet_settings);
+  EEPROM.begin(start_pos + 4);
   for (i = 0; i < 4; i++)
   {
     EEPROM.write(start_pos+i,fOffset[i]);
+    
   }
   EEPROM.commit();
 }
@@ -379,8 +381,8 @@ void loadOffsetFromFlash()
   byte i;
   int start_pos;
 
-  EEPROM.begin(4);
   start_pos = sizeof(parakeet_settings);
+  EEPROM.begin(start_pos + 4);
   for (i = 0; i < 4; i++)
   {
     fOffset[i] = EEPROM.read(start_pos+i);
@@ -609,7 +611,7 @@ void init_CC2500() {
    //0x6a = 271 khz
    //0x7a = 232 khz
 //   WriteReg(MDMCFG4, 0x7a); //appear to get better sensitivity
-   WriteReg(MDMCFG4, 0x5a); //  Rx Filter BW
+   WriteReg(MDMCFG4, 0x7a); //  Rx Filter BW
    WriteReg(MDMCFG3, 0xf8);
    WriteReg(MDMCFG2, 0x73);
    WriteReg(MDMCFG1, 0x23);
@@ -1640,6 +1642,10 @@ void swap_channel(unsigned long channel, byte newFSCTRL0) {
 
   SendStrobe(SIDLE);
   SendStrobe(SFRX);
+#ifdef DEBUG
+  Serial.print("FSCTRL0 = ");
+  Serial.println(newFSCTRL0,HEX);
+#endif
   WriteReg(FSCTRL0,newFSCTRL0);
   WriteReg(CHANNR, channel);
   SendStrobe(SRX);  //RX
@@ -2155,13 +2161,7 @@ void loop() {
 #endif
 
   packet_len = ReadRadioBuffer();
-  if (Pkt.src_addr == dex_tx_id) {
-#ifdef DEBUG
-    Serial.print("Catched.Ch=");
-    Serial.println(nChannels[current_channel]);
-    Serial.print("gdo0_status = ");
-    Serial.println(gdo0_status);
-#endif
+  if (packet_len == 0 || packet_len == 21) {
     freqest = ReadStatus(FREQEST);
 //    fOffset[current_channel] += freqest;
     fOffset[current_channel] = freqest;
@@ -2169,6 +2169,14 @@ void loop() {
 #ifdef DEBUG
     Serial.print("Offset:");
     Serial.println(fOffset[current_channel], HEX);
+#endif
+  }
+  if (Pkt.src_addr == dex_tx_id) {
+#ifdef DEBUG
+    Serial.print("gdo0_status = ");
+    Serial.println(gdo0_status);
+    Serial.print("Catched.Ch=");
+    Serial.println(nChannels[current_channel]);
 #endif
     catch_time = current_time - 500 * current_channel; // Приводим к каналу 0
     next_time = catch_time + FIVE_MINUTE;
