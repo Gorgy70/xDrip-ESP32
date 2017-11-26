@@ -2,7 +2,7 @@
 #define DEBUG
 //#define INT_BLINK_LED
 #define EXT_BLINK_LED
-//#define GSM_MODEM
+#define GSM_MODEM
 #define MODEM_SLEEP_DTR
 #define PCB_V1
 //#define PCB_V2
@@ -1189,7 +1189,7 @@ boolean gsm_command(const char *command, const char *response, int timeout, bool
 }
 
 boolean gsm_command(const char *command, const char *response, int timeout) {
-  gsm_command(command,response,timeout,true);
+  return gsm_command(command,response,timeout,true);
 }
 
 boolean set_gprs_profile() {
