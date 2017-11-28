@@ -99,6 +99,7 @@ char transmitter_id[] = "ABCDE";
 IPAddress local_IP(192,168,70,1);
 IPAddress gateway(192,168,70,1);
 IPAddress subnet(255,255,255,0);
+uint8_t   wifi_mac[6];
 
 WiFiServer server(80);
 WiFiClient client;
@@ -844,8 +845,11 @@ void PrepareWebServer() {
 #endif      
 */
   WiFi.softAP("Parakeet");
+  WiFi.softAPmacAddress(wifi_mac);
 #ifdef DEBUG
   Serial.println("Set SSID Name Done!");    
+  Serial.print("WiFi MAC = ");
+  Serial.println(WiFi.softAPmacAddress());
 #endif      
   bool ret = WiFi.softAPConfig(local_IP, gateway, subnet);
 #ifdef DEBUG
@@ -1098,10 +1102,10 @@ void PrepareBlueTooth() {
     /* set BLE name and broadcast advertising info
     so that the world can see you*/
     if (settings.bt_format == 1) {
-      sprintf(bt_name,"xDripESP");
+      sprintf(bt_name,"%s%02X%02X","xDripESP",wifi_mac[4],wifi_mac[5]);
     } 
     else if (settings.bt_format == 2) {   
-      sprintf(bt_name,"xBridgeESP");
+      sprintf(bt_name,"%s%02X%02X","xBridgeESP",wifi_mac[4],wifi_mac[5]);
     }
     esp_ble_gap_set_device_name(bt_name);
     esp_ble_gap_config_adv_data(&ble_adv_data);
@@ -1816,8 +1820,8 @@ boolean print_wifi_packet() {
 */                       
     byte tp = mesure_temperature();                                                                                 
     ts = millis()-catch_time;  
-    request = my_webservice_url;                                                                                                      
-    request = request + "?rr=" + millis() + "&zi=" + dex_tx_id + "&pc=" + my_password_code +
+    request = settings.http_url;                                                                                                      
+    request = request + "?rr=" + millis() + "&zi=" + dex_tx_id + "&pc=" + settings.password_code +
               "&lv=" + dex_num_decoder(Pkt.raw) + "&lf=" + dex_num_decoder(Pkt.filtered)*2 + "&db=" + Pkt.battery +
               "&ts=" + ts + "&bp=" + battery_percent + "&bm=" + battery_milivolts + "&ct=" + tp; 
     http.begin(request); //HTTP
@@ -2226,7 +2230,7 @@ void loop() {
     mesure_battery();
   }
 #ifdef GSM_MODEM
-  if (gsm_availible) {
+  if (gsm_availible && (packet_catched || current_channel == 0)) {
     if (modem_sleeping) gsm_wake_up(); // Будим GSM-модем
     if (gsm_availible) {    
       read_sms(); // Прочитаем полученные смс-ки
