@@ -6,6 +6,7 @@
 #define MODEM_SLEEP_DTR
 #define PCB_V1
 //#define PCB_V2
+//#define USE_FREQEST    
 
 
 #include <SPI.h>
@@ -362,6 +363,7 @@ unsigned long checksum_settings()
   return chk;
 }
 
+#ifdef USE_FREQEST    
 void saveOffsetToFlash()
 { 
   byte i;
@@ -390,6 +392,7 @@ void loadOffsetFromFlash()
   }
   
 }
+#endif
 
 void saveSettingsToFlash()
 {
@@ -1612,7 +1615,9 @@ void setup() {
       wake_up_time = WAKEUP_NON_BT_TIME;      
     }
     mesure_battery();   
+#ifdef USE_FREQEST    
     loadOffsetFromFlash(); // Считываем текущие смещения частоты и постояной памяти
+#endif
   } 
   else {
 #ifdef DEBUG
@@ -1628,7 +1633,9 @@ void setup() {
     b1 = ReadStatus(VERSION);
     Serial.println(b1,HEX);
 #endif
+#ifdef USE_FREQEST    
     saveOffsetToFlash(); // Сохраняем смещения частоты по умолчанию в постоянной памяти
+#endif
     PrepareWebServer();
 
 #ifdef DEBUG
@@ -1650,7 +1657,9 @@ void swap_channel(unsigned long channel, byte newFSCTRL0) {
   Serial.print("FSCTRL0 = ");
   Serial.println(newFSCTRL0,HEX);
 #endif
+#ifdef USE_FREQEST    
   WriteReg(FSCTRL0,newFSCTRL0);
+#endif
   WriteReg(CHANNR, channel);
   SendStrobe(SRX);  //RX
   while (ReadStatus(MARCSTATE) != 0x0d) {
@@ -2059,12 +2068,32 @@ void esp32_goto_sleep() {
   
 }
 
+#ifdef GSM_MODEM
+void check_sms() {
+  if (gsm_availible ) {
+#ifdef DEBUG
+    Serial.println("gsm_availible. Let's check sms");
+    Serial.print("current_channel = ");
+    Serial.println(current_channel);
+#endif
+    if (packet_catched || (current_channel == 0)) {
+      if (modem_sleeping) gsm_wake_up(); // Будим GSM-модем
+      if (gsm_availible) {    
+        read_sms(); // Прочитаем полученные смс-ки
+      }  
+      gsm_goto_sleep();
+    }  
+  }    
+}
+#endif
+
 void loop() {
   unsigned long current_time;
   boolean packet_on_board;
   int old_channel;
   byte packet_len;
   uint8_t freqest;
+  int rssi;
 
 // Первые две минуты работает WebServer на адресе 192.168.70.1 для конфигурации устройства
   if (web_server_start_time > 0) {
@@ -2115,7 +2144,12 @@ void loop() {
   }
   if (current_channel > 0 && current_time - cc2500_start_time > waitTimes[current_channel]) {
     current_channel++;
-    if (current_channel > 3) current_channel = 0;
+    if (current_channel > 3) {
+      current_channel = 0;
+#ifdef GSM_MODEM
+      check_sms();
+#endif
+    }
   }  
 
   if (current_channel != old_channel) {  
@@ -2154,7 +2188,7 @@ void loop() {
     }
   }
   
-  if (!packet_on_board) return; // Нет сигнала от декскома - выходим из цикла
+  if (packet_on_board) return; // Нет сигнала от декскома - выходим из цикла
 
 #ifdef INT_BLINK_LED
   digitalWrite(LED_BUILTIN, LOW);
@@ -2169,7 +2203,9 @@ void loop() {
     freqest = ReadStatus(FREQEST);
 //    fOffset[current_channel] += freqest;
     fOffset[current_channel] = freqest;
+#ifdef USE_FREQEST    
     saveOffsetToFlash(); // Сохраняем смещения частоты по умолчанию в постоянной памяти
+#endif
 #ifdef DEBUG
     Serial.print("Offset:");
     Serial.println(fOffset[current_channel], HEX);
@@ -2181,6 +2217,12 @@ void loop() {
     Serial.println(gdo0_status);
     Serial.print("Catched.Ch=");
     Serial.println(nChannels[current_channel]);
+    Serial.print("Signal Power = ");
+    if (Pkt.RSSI > 127) rssi = (Pkt.RSSI - 256) / 2 - 73;
+    else rssi = Pkt.RSSI / 2 - 73;
+    Serial.println(rssi);
+    Serial.print("Signal Quality = ");
+    Serial.println(Pkt.LQI2);
 #endif
     catch_time = current_time - 500 * current_channel; // Приводим к каналу 0
     next_time = catch_time + FIVE_MINUTE;
@@ -2230,13 +2272,7 @@ void loop() {
     mesure_battery();
   }
 #ifdef GSM_MODEM
-  if (gsm_availible && (packet_catched || current_channel == 0)) {
-    if (modem_sleeping) gsm_wake_up(); // Будим GSM-модем
-    if (gsm_availible) {    
-      read_sms(); // Прочитаем полученные смс-ки
-    }  
-    gsm_goto_sleep();
-  }  
+  check_sms();
 #endif
   
   if (packet_catched) {
