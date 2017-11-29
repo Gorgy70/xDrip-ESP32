@@ -2188,7 +2188,7 @@ void loop() {
     }
   }
   
-  if (packet_on_board) return; // Нет сигнала от декскома - выходим из цикла
+  if (!packet_on_board) return; // Нет сигнала от декскома - выходим из цикла
 
 #ifdef INT_BLINK_LED
   digitalWrite(LED_BUILTIN, LOW);
@@ -2205,10 +2205,10 @@ void loop() {
     fOffset[current_channel] = freqest;
 #ifdef USE_FREQEST    
     saveOffsetToFlash(); // Сохраняем смещения частоты по умолчанию в постоянной памяти
-#endif
 #ifdef DEBUG
     Serial.print("Offset:");
     Serial.println(fOffset[current_channel], HEX);
+#endif
 #endif
   }
   if (Pkt.src_addr == dex_tx_id) {
@@ -2237,12 +2237,12 @@ void loop() {
     cc2500_start_time = current_time;
     swap_channel(nChannels[current_channel], fOffset[current_channel]);
 #ifdef DEBUG
+    Serial.print("gdo0_status = ");
+    Serial.println(gdo0_status);
     Serial.print("Chanel = ");
     Serial.print(nChannels[current_channel]);
     Serial.print(" Time = ");
     Serial.println(cc2500_start_time);
-    Serial.print("gdo0_status = ");
-    Serial.println(gdo0_status);
 #endif
   }
   gdo0_status = 0;
