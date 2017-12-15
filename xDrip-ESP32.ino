@@ -2,13 +2,14 @@
 #define DEBUG
 //#define INT_BLINK_LED
 #define EXT_BLINK_LED
-#define GSM_MODEM
+//#define GSM_MODEM
 #define MODEM_SLEEP_DTR
 #define PCB_V1
 //#define PCB_V2
 //#define USE_FREQEST    
 
 
+#include <driver/gpio.h>
 #include <SPI.h>
 #include <EEPROM.h>
 #include <WiFi.h>
@@ -16,11 +17,15 @@
 #include <bt.h>
 #include <bta_api.h>
 
+#include <esp_wifi.h>
+#include <esp_wifi_types.h>
 #include <esp_gap_ble_api.h>
 #include <esp_gatts_api.h>
 #include <esp_bt_defs.h>
 #include <esp_bt_main.h>
 #include <esp_bt_main.h>
+#include <esp_sleep.h>
+#include <esp_deep_sleep.h>
 
 #include "cc2500_REG.h"
 #include "webform.h"
@@ -29,28 +34,28 @@ extern "C" {
 uint8_t temprature_sens_read(); 
 }
 
-#define GDO0_PIN   19            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
-#define LEN_PIN    5             // Цифровой канал, к которму подключен контакт LEN (усилитель слабого сигнала) платы CC2500 (Предыдущее значение 17).
-#define BAT_PIN    34            // Аналоговый канал для измерения напряжения питания
+#define GDO0_PIN   GPIO_NUM_19            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
+#define LEN_PIN    GPIO_NUM_5             // Цифровой канал, к которму подключен контакт LEN (усилитель слабого сигнала) платы CC2500 (Предыдущее значение 17).
+#define BAT_PIN    GPIO_NUM_34            // Аналоговый канал для измерения напряжения питания
 #ifdef EXT_BLINK_LED
-  #define RED_LED_PIN    16
-  #define YELLOW_LED_PIN 17
+  #define RED_LED_PIN    GPIO_NUM_16
+  #define YELLOW_LED_PIN GPIO_NUM_17
 #endif
 
-#define SCK_PIN   22
-#define MISO_PIN  21
-#define MOSI_PIN  23
-#define SS_PIN    18 // Предыдущее значение 5
+#define SCK_PIN   GPIO_NUM_22
+#define MISO_PIN  GPIO_NUM_21
+#define MOSI_PIN  GPIO_NUM_23
+#define SS_PIN    GPIO_NUM_18 // Предыдущее значение 5
 #ifdef GSM_MODEM
-  #define RX_PIN  25
-  #define TX_PIN  26
+  #define RX_PIN  GPIO_NUM_25
+  #define TX_PIN  GPIO_NUM_26
 #ifdef PCB_V1
-  #define DTR_PIN 13
+  #define DTR_PIN GPIO_NUM_13
 #endif
 #ifdef PCB_V2
-  #define DTR_PIN 14
+  #define DTR_PIN GPIO_NUM_14
 #endif
-  #define RST_PIN 27
+  #define RST_PIN GPIO_NUM_27
 #endif
 
 #define NUM_CHANNELS        (4)       // Кол-во проверяемых каналов
@@ -58,6 +63,7 @@ uint8_t temprature_sens_read();
 #define TWO_MINUTE          120000    // 2 минуты
 #define WAKEUP_BT_TIME      45000     // Время необходимое для просыпания прибора c BT
 #define WAKEUP_NON_BT_TIME  3000      // Время необходимое для просыпания прибора без BT
+#define SPI_TIME_OUT        1000
 
 #define RADIO_BUFFER_LEN 200 // Размер буфера для приема данных от радиомодуля
 #ifdef GSM_MODEM
@@ -121,9 +127,14 @@ int current_channel;
 boolean packet_catched;
 boolean len_pin_low;
 volatile byte gdo0_status;
+byte loop_count;
 
-//byte fOffset[NUM_CHANNELS] = { 0xE4, 0xE3, 0xE2, 0xE2 };
+
+#ifdef USE_FREQEST
 byte fOffset[NUM_CHANNELS] = { 0x00, 0x00, 0x00, 0x00 };
+#else
+byte fOffset[NUM_CHANNELS] = { 0xE4, 0xE3, 0xE2, 0xE2 };
+#endif
 byte nChannels[NUM_CHANNELS] = { 0, 100, 199, 209 };
 unsigned long waitTimes[NUM_CHANNELS] = { 0, 600, 600, 600 };
 
@@ -447,7 +458,7 @@ void blink_sequence_red(const char *sequence) {
     digitalWrite(RED_LED_PIN, HIGH);
     switch (sequence[i]) {
       case '0': 
-        delay(500);
+        delay(200);
         break;
       case '1': 
         delay(1000);
@@ -590,8 +601,8 @@ void init_CC2500() {
 //   WriteReg(IOCFG0, 0x01);
    WriteReg(IOCFG0, 0x06);
    WriteReg(PKTLEN, 0xff);
-   WriteReg(PKTCTRL1, 0x0C); // CRC_AUTOFLUSH = 1 & APPEND_STATUS = 1
-//   WriteReg(PKTCTRL1, 0x04);
+//   WriteReg(PKTCTRL1, 0x0C); // CRC_AUTOFLUSH = 1 & APPEND_STATUS = 1
+   WriteReg(PKTCTRL1, 0x04); // APPEND_STATUS = 1
    WriteReg(PKTCTRL0, 0x05);
    WriteReg(ADDR, 0x00);
    WriteReg(CHANNR, 0x00);
@@ -648,9 +659,18 @@ void init_CC2500() {
 }
 
 char ReadReg(char addr) {
+  unsigned long t1;
+  
   addr = addr + 0x80;
   digitalWrite(SS_PIN, LOW);
+  t1 = millis();
   while (digitalRead(MISO_PIN) == HIGH) {
+    if (millis() - t1 > SPI_TIME_OUT) {
+#ifdef DEBUG
+      Serial.println("SPI timeout"); 
+#endif
+      break;
+    }
   };
   SPIclient.transfer(addr);
   char y = SPIclient.transfer(0);
@@ -660,9 +680,18 @@ char ReadReg(char addr) {
 }
 
 char ReadStatus(char addr) {
+  unsigned long t1;
+  
   addr = addr + 0xC0;
   digitalWrite(SS_PIN, LOW);
+  t1 = millis();
   while (digitalRead(MISO_PIN) == HIGH) {
+    if (millis() - t1 > SPI_TIME_OUT) {
+#ifdef DEBUG
+      Serial.println("SPI timeout"); 
+#endif
+      break;
+    }
   };
   SPIclient.transfer(addr);
   char y = SPIclient.transfer(0);
@@ -848,11 +877,8 @@ void PrepareWebServer() {
 #endif      
 */
   WiFi.softAP("Parakeet");
-  WiFi.softAPmacAddress(wifi_mac);
 #ifdef DEBUG
   Serial.println("Set SSID Name Done!");    
-  Serial.print("WiFi MAC = ");
-  Serial.println(WiFi.softAPmacAddress());
 #endif      
   bool ret = WiFi.softAPConfig(local_IP, gateway, subnet);
 #ifdef DEBUG
@@ -950,11 +976,10 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
         conn_params.min_int = 0x30;    // min_int = 0x30*1.25ms = 60ms
         conn_params.timeout = 1000;    // timeout = 1000*10ms = 10000ms
 #ifdef DEBUG
-        printf("ESP_GATTS_CONNECT_EVT, conn_id %d, remote %02x:%02x:%02x:%02x:%02x:%02x:, is_conn %d\n",
+        printf("ESP_GATTS_CONNECT_EVT, conn_id %d, remote %02x:%02x:%02x:%02x:%02x:%02x:\n",
                  param->connect.conn_id,
                  param->connect.remote_bda[0], param->connect.remote_bda[1], param->connect.remote_bda[2],
-                 param->connect.remote_bda[3], param->connect.remote_bda[4], param->connect.remote_bda[5],
-                 param->connect.is_connected);
+                 param->connect.remote_bda[3], param->connect.remote_bda[4], param->connect.remote_bda[5]);
 #endif      
         //start sent the update connection parameters to the peer device.
         esp_ble_gap_update_conn_params(&conn_params);
@@ -1105,10 +1130,10 @@ void PrepareBlueTooth() {
     /* set BLE name and broadcast advertising info
     so that the world can see you*/
     if (settings.bt_format == 1) {
-      sprintf(bt_name,"%s%02X%02X","xDripESP",wifi_mac[4],wifi_mac[5]);
+      sprintf(bt_name,"%s%02X%02X","xDrip",wifi_mac[4],wifi_mac[5]);
     } 
     else if (settings.bt_format == 2) {   
-      sprintf(bt_name,"%s%02X%02X","xBridgeESP",wifi_mac[4],wifi_mac[5]);
+      sprintf(bt_name,"%s%02X%02X","xBridge",wifi_mac[4],wifi_mac[5]);
     }
     esp_ble_gap_set_device_name(bt_name);
     esp_ble_gap_config_adv_data(&ble_adv_data);
@@ -1538,6 +1563,20 @@ void gsm_get_battery(byte *percent,int *millivolts) {
 }
 #endif
 
+void get_wifi_mac() {
+  wifi_init_config_t wifi_cfg = WIFI_INIT_CONFIG_DEFAULT();
+  esp_wifi_init(&wifi_cfg);
+  esp_wifi_set_mode(WIFI_MODE_AP);
+  esp_wifi_start();
+  esp_wifi_get_mac(WIFI_IF_AP, wifi_mac);
+#ifdef DEBUG
+  Serial.print("WiFi MAC = ");
+  Serial.println(WiFi.softAPmacAddress());
+#endif      
+  esp_wifi_stop();
+  esp_wifi_deinit();  
+}
+
 void setup() {
     
   esp_deep_sleep_wakeup_cause_t wake_up;
@@ -1573,6 +1612,8 @@ void setup() {
   pinMode(YELLOW_LED_PIN, OUTPUT);
 #endif
 
+  get_wifi_mac();
+  
   loadSettingsFromFlash();
 #ifdef DEBUG
   Serial.print("Dexcom ID: ");
@@ -1607,6 +1648,7 @@ void setup() {
 #endif
     web_server_start_time = 0;  
     PrepareBlueTooth();
+/*    
     if (settings.bt_format > 0) {
       wake_up_time = WAKEUP_BT_TIME;        
       delay(wake_up_time - millis() - WAKEUP_NON_BT_TIME); // До следующего сигнала еще долго. Надо подождать.
@@ -1614,6 +1656,7 @@ void setup() {
     else {
       wake_up_time = WAKEUP_NON_BT_TIME;      
     }
+*/    
     mesure_battery();   
 #ifdef USE_FREQEST    
     loadOffsetFromFlash(); // Считываем текущие смещения частоты и постояной памяти
@@ -1642,10 +1685,12 @@ void setup() {
     Serial.println("Wait two minutes or configure device!");
 #endif
   }
+  wake_up_time = WAKEUP_NON_BT_TIME;      
   current_channel = -1;
   packet_catched = false;
   len_pin_low = true;
   gdo0_status = 0;
+  loop_count = 0;
   attachInterrupt(digitalPinToInterrupt(GDO0_PIN),gdo0_pin_up , RISING);
 }
 
@@ -1653,11 +1698,11 @@ void swap_channel(unsigned long channel, byte newFSCTRL0) {
 
   SendStrobe(SIDLE);
   SendStrobe(SFRX);
+#ifdef USE_FREQEST    
 #ifdef DEBUG
   Serial.print("FSCTRL0 = ");
   Serial.println(newFSCTRL0,HEX);
 #endif
-#ifdef USE_FREQEST    
   WriteReg(FSCTRL0,newFSCTRL0);
 #endif
   WriteReg(CHANNR, channel);
@@ -1667,13 +1712,29 @@ void swap_channel(unsigned long channel, byte newFSCTRL0) {
   }
 }
 
+boolean radioCrcPassed()
+{
+  byte lqi;
+
+  lqi = ReadStatus(LQI);
+  return (LQI & 0x80) ? true : false;
+}
+
 byte ReadRadioBuffer() {
   byte len;
   byte i;
-  byte rxbytes;
+  byte rxbytes;  
 
   memset (&radio_buff, 0, sizeof (Dexcom_packet));
-  len = ReadStatus(RXBYTES);
+  if (radioCrcPassed()) {
+    len = ReadStatus(RXBYTES);
+  } 
+  else {
+    len = 0;
+#ifdef DEBUG
+    Serial.println("Bad CRC");
+#endif
+  }
 #ifdef DEBUG
   Serial.print("Bytes in buffer: ");
   Serial.println(len);
@@ -1898,11 +1959,14 @@ void print_bt_packet() {
   if (settings.bt_format == 0) {
     return;
   }
-  if (ble_gatts_if == ESP_GATT_IF_NONE ) {
+  while (ble_gatts_if != ESP_GATT_IF_NONE ) {
+    delay(500);
+    if (millis() - catch_time > WAKEUP_BT_TIME) {
 #ifdef DEBUG
-    Serial.println("Not connected");
+      Serial.println("Not connected");
 #endif
-    return;
+      return;
+    }  
   }
 //  sprintf(dex_data,"%lu %d %d",275584,battery,3900);
 #ifdef INT_BLINK_LED    
@@ -2087,6 +2151,27 @@ void check_sms() {
 }
 #endif
 
+void light_sleep(unsigned long time_ms) {
+  esp_err_t err;
+  
+//  err = esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH,ESP_PD_OPTION_ON);
+//    err = esp_sleep_enable_ext0_wakeup(GDO0_PIN,HIGH);
+  err = esp_sleep_enable_timer_wakeup(time_ms*1000);
+#ifdef DEBUG
+  if (err) {
+    Serial.print("esp_sleep_enable_timer_wakeup, res = ");
+    Serial.println(err);
+  }  
+#endif
+  err = esp_light_sleep_start();
+#ifdef DEBUG
+  if (err) {
+    Serial.print("esp_light_sleep_start, res = ");
+    Serial.println(err);
+  }  
+#endif  
+}
+
 void loop() {
   unsigned long current_time;
   boolean packet_on_board;
@@ -2112,12 +2197,14 @@ void loop() {
 #ifdef DEBUG
       Serial.println("Configuration mode is done!");
 #endif
+/*
       if (settings.bt_format == 0) {
         wake_up_time = WAKEUP_NON_BT_TIME;
       }
       else {
         wake_up_time = WAKEUP_BT_TIME;        
       }
+*/      
       PrepareBlueTooth();
       delay(500);
       mesure_battery();        
@@ -2129,14 +2216,15 @@ void loop() {
   }
 
 // Ловим сигнал от Декскома
-  delay(1);
+//  delay(1);
   
   current_time = millis();
 
   if (len_pin_low) {
     digitalWrite(LEN_PIN, HIGH); // Включаем усилитель слабого сигнала
+// Включаем усилитель слабого сигнала  
     len_pin_low = false;
-  } // Включаем усилитель слабого сигнала  
+  } 
 
   old_channel = current_channel;
   if (current_channel < 0) {
@@ -2162,7 +2250,8 @@ void loop() {
     Serial.println(cc2500_start_time);
 #endif
   }
-   
+
+/*   
 #ifdef INT_BLINK_LED
   blink_builtin_led_quarter();
 #endif
@@ -2181,7 +2270,22 @@ void loop() {
     }
   }  
 #endif
-  packet_on_board = gdo0_status;
+*/
+  if (current_channel == 0) {
+    light_sleep(100);
+    delay(1);
+    packet_on_board = ReadStatus(RXBYTES);   
+#ifdef EXT_BLINK_LED
+    loop_count++;
+    if (loop_count > 10) {
+      digitalWrite(YELLOW_LED_PIN, HIGH);
+      loop_count = 0;
+    } 
+    else digitalWrite(YELLOW_LED_PIN, LOW);
+// Зажигаем желтую ламочку
+#endif
+  } 
+  else packet_on_board = gdo0_status;
   if (packet_on_board) {
     while (digitalRead(GDO0_PIN) == HIGH) {
     // Идет прием пакета
@@ -2250,8 +2354,7 @@ void loop() {
   if (packet_catched)
   {
     mesure_battery();
-    print_bt_packet();
-    delay(500);
+//    delay(500);
     if (!print_wifi_packet () && settings.use_gsm) {
 #ifdef GSM_MODEM
       gsm_wake_up(); // Будим GSM-модем
@@ -2264,6 +2367,7 @@ void loop() {
         }
       }  
 #endif      
+    print_bt_packet();
     }
 //  - Отправить пакет по модему, если он не ушел по ВайФай    
   } 
