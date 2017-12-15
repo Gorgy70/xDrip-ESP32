@@ -128,7 +128,9 @@ boolean packet_catched;
 boolean len_pin_low;
 volatile byte gdo0_status;
 byte loop_count;
-
+volatile boolean new_dex_id_recieved;
+volatile boolean ack_recieved;
+volatile boolean ble_connected;
 
 #ifdef USE_FREQEST
 byte fOffset[NUM_CHANNELS] = { 0x00, 0x00, 0x00, 0x00 };
@@ -167,7 +169,7 @@ unsigned int wake_up_time; // За сколько времени до ожида
 
 char radio_buff[RADIO_BUFFER_LEN]; // Буффер для чтения данных и прочих нужд
 
-uint16_t ble_gatts_if = ESP_GATT_IF_NONE;
+volatile uint16_t ble_gatts_if = ESP_GATT_IF_NONE;
 uint16_t ble_conn_id;
 uint16_t ble_attr_handle;
 
@@ -994,7 +996,20 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
         Serial.println(*(uint8_t *)param->write.value);
 #endif      
         memcpy(dexderip_data,param->write.value,param->write.len);
+#ifdef DEBUG
+        Serial.print("byte 1 = ");
+        Serial.println(dexderip_data[0],HEX);
+        Serial.print("byte 2 = ");
+        Serial.println(dexderip_data[1],HEX);
+#endif      
+        if (param->write.len = 0x2 && dexderip_data[0] == 0x1 && dexderip_data[1] == 0x0) {
+          ble_connected = true;
+#ifdef DEBUG
+          Serial.println("BLE connected");
+#endif                
+        }
         if (param->write.len = 0x2 && dexderip_data[0] == 0x2 && dexderip_data[1] == 0xF0) {
+          ack_recieved = true;
 #ifdef DEBUG
           Serial.println("Data Acknowledge Packet");
 #endif                
@@ -1002,6 +1017,7 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
         if (param->write.len = 0x6 && dexderip_data[0] == 0x6 && dexderip_data[1] == 0x01) {
           memcpy(&dex_tx_id,&dexderip_data[2],4);
           settings.dex_tx_id = dex_tx_id;
+          new_dex_id_recieved = true;
           saveSettingsToFlash();
 #ifdef DEBUG
           Serial.println("New TransmitterID Packet");
@@ -1030,6 +1046,9 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
         ble_gatts_if = ESP_GATT_IF_NONE;
         ble_conn_id = 0;
         esp_ble_gap_start_advertising(&ble_adv_params);
+#ifdef DEBUG
+        Serial.println("BLE DISCONECT");
+#endif      
         break;
     }    
 #ifdef DEBUG
@@ -1060,12 +1079,20 @@ void sendBeacon()
 {
   //char array to store the response in.
   unsigned char cmd_response[8];
+  unsigned long t1;
 
-  if (ble_gatts_if == ESP_GATT_IF_NONE ) {
+  PrepareBlueTooth();
+  t1 = millis();
+  ble_connected = false;
+  while (!ble_connected) {
+    delay(500);
+    if (millis() - t1 > WAKEUP_BT_TIME) {
 #ifdef DEBUG
-    Serial.println("Not connected");
+      Serial.println("Not connected");
 #endif
-    return;
+      stop_bluetooth();
+      return;
+    }  
   }
   
   //return if we don't have a connection or if we have already sent a beacon
@@ -1084,6 +1111,13 @@ void sendBeacon()
     Serial.println("Send indicate fail");
    }  
 #endif
+  new_dex_id_recieved = false;
+  t1 = millis();
+  while (!new_dex_id_recieved) {
+    delay(200);
+    if (millis() - t1 > WAKEUP_BT_TIME) break;
+  }
+  stop_bluetooth();
 }
 
 void PrepareBlueTooth() {
@@ -1647,7 +1681,7 @@ void setup() {
     modem_sleeping = true;
 #endif
     web_server_start_time = 0;  
-    PrepareBlueTooth();
+//    PrepareBlueTooth();
 /*    
     if (settings.bt_format > 0) {
       wake_up_time = WAKEUP_BT_TIME;        
@@ -1717,7 +1751,11 @@ boolean radioCrcPassed()
   byte lqi;
 
   lqi = ReadStatus(LQI);
-  return (LQI & 0x80) ? true : false;
+#ifdef DEBUG
+  Serial.print("LQI = ");
+  Serial.println(lqi,HEX);
+#endif
+  return (lqi & 0x80) ? true : false;
 }
 
 byte ReadRadioBuffer() {
@@ -1955,16 +1993,25 @@ boolean print_wifi_packet() {
 void print_bt_packet() {
   RawRecord msg;  
   byte msg_len;
+  unsigned long t1;
 
+#ifdef DEBUG
+  Serial.print("Transmit bt data. bt_format = ");
+  Serial.println(settings.bt_format);
+#endif
   if (settings.bt_format == 0) {
     return;
   }
-  while (ble_gatts_if != ESP_GATT_IF_NONE ) {
+  PrepareBlueTooth();
+  t1 = millis();
+  ble_connected = false;
+  while (!ble_connected) {
     delay(500);
-    if (millis() - catch_time > WAKEUP_BT_TIME) {
+    if (millis() - t1 > WAKEUP_BT_TIME) {
 #ifdef DEBUG
       Serial.println("Not connected");
 #endif
+      stop_bluetooth();
       return;
     }  
   }
@@ -2002,15 +2049,22 @@ void print_bt_packet() {
     radio_buff[16] = msg.function;
     msg_len = sizeof(msg);
   }
-   esp_err_t ret = esp_ble_gatts_send_indicate(ble_gatts_if, ble_conn_id, ble_attr_handle, msg_len,(uint8_t*)&radio_buff[0], false); 
+  esp_err_t ret = esp_ble_gatts_send_indicate(ble_gatts_if, ble_conn_id, ble_attr_handle, msg_len,(uint8_t*)&radio_buff[0], false); 
 #ifdef DEBUG
-   if (ret == ESP_OK) {
-     Serial.println("Send indicate OK");    
-   } 
-   else {
+  if (ret == ESP_OK) {
+    Serial.println("Send indicate OK");    
+  } 
+  else {
     Serial.println("Send indicate fail");
-   }  
+  }  
 #endif
+  t1 = millis();
+  ack_recieved = false;
+  while (!ack_recieved) {
+    delay(200);
+    if (millis() - t1 > WAKEUP_BT_TIME) break;
+  }
+  stop_bluetooth();
 #ifdef INT_BLINK_LED    
   digitalWrite(LED_BUILTIN, LOW);
 #endif
@@ -2103,8 +2157,7 @@ void HandleWebClient() {
   }  
 }
 
-void esp32_goto_sleep() {
-  unsigned long current_time;
+void stop_bluetooth() {
   esp_bluedroid_status_t stat;
   
   stat = esp_bluedroid_get_status();
@@ -2117,7 +2170,13 @@ void esp32_goto_sleep() {
     esp_bluedroid_deinit();
     delay(500);
   }  
-  btStop();
+  btStop();  
+  ble_gatts_if = ESP_GATT_IF_NONE;
+  ble_conn_id = 0;
+}
+
+void esp32_goto_sleep() {
+  unsigned long current_time;
 
 #ifdef DEBUG
   Serial.println("Goto sleep!");
@@ -2205,8 +2264,9 @@ void loop() {
         wake_up_time = WAKEUP_BT_TIME;        
       }
 */      
-      PrepareBlueTooth();
-      delay(500);
+      if (settings.bt_format == 2 && dex_tx_id == 10858926) sendBeacon();
+//      PrepareBlueTooth();
+//      delay(500);
       mesure_battery();        
 #ifdef GSM_MODEM
       init_GSM(true);
@@ -2356,6 +2416,7 @@ void loop() {
     mesure_battery();
 //    delay(500);
     if (!print_wifi_packet () && settings.use_gsm) {
+//  - Отправить пакет по модему, если он не ушел по ВайФай    
 #ifdef GSM_MODEM
       gsm_wake_up(); // Будим GSM-модем
       if (modem_availible) {
@@ -2367,9 +2428,9 @@ void loop() {
         }
       }  
 #endif      
-    print_bt_packet();
     }
-//  - Отправить пакет по модему, если он не ушел по ВайФай    
+//  - Отправить пакет по BlueTooth
+    print_bt_packet();
   } 
   else if (current_channel == 0) {
     sendBeacon();
