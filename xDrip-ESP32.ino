@@ -2,8 +2,8 @@
 #define DEBUG
 //#define INT_BLINK_LED
 #define EXT_BLINK_LED
-//#define GSM_MODEM
-#define MODEM_SLEEP_DTR
+#define GSM_MODEM
+//#define MODEM_SLEEP_DTR
 #define PCB_V1
 //#define PCB_V2
 //#define USE_FREQEST    
@@ -1896,7 +1896,7 @@ boolean print_wifi_packet() {
   digitalWrite(LED_BUILTIN, HIGH);
 #endif
 #ifdef EXT_BLINK_LED    
-  digitalWrite(RED_LED_PIN, HIGH);
+  digitalWrite(YELLOW_LED_PIN, HIGH);
 #endif
     // wait for WiFi connection
   i = 0;  
@@ -1916,7 +1916,13 @@ boolean print_wifi_packet() {
 #ifdef DEBUG
   Serial.println();
 #endif
+#ifdef EXT_BLINK_LED    
+  digitalWrite(YELLOW_LED_PIN, LOW);
+#endif
   if((WiFi.status() == WL_CONNECTED)) {
+#ifdef EXT_BLINK_LED    
+    digitalWrite(RED_LED_PIN, HIGH);
+#endif
 /*    
     sprintf(radio_buff,"%s?rr=%lu&zi=%lu&pc=%s&lv=%lu&lf=%lu&db=%hhu&ts=%lu&bp=%d&bm=%d&ct=%d&gl=%s\" ",my_webservice_url,millis(),dex_tx_id,my_password_code,
                                                                                                         dex_num_decoder(Pkt.raw),dex_num_decoder(Pkt.filtered)*2,
@@ -1968,6 +1974,9 @@ boolean print_wifi_packet() {
 #endif        
     }
     WiFi.disconnect(true);
+#ifdef EXT_BLINK_LED    
+    digitalWrite(RED_LED_PIN, LOW);
+#endif
   }
   else {
 #ifdef INT_BLINK_LED    
@@ -1984,9 +1993,6 @@ boolean print_wifi_packet() {
 #ifdef INT_BLINK_LED    
   digitalWrite(LED_BUILTIN, LOW);
 #endif
-#ifdef EXT_BLINK_LED    
-  digitalWrite(RED_LED_PIN, LOW);
-#endif
   return ret;
 }
 
@@ -2002,6 +2008,9 @@ void print_bt_packet() {
   if (settings.bt_format == 0) {
     return;
   }
+#ifdef EXT_BLINK_LED    
+  digitalWrite(YELLOW_LED_PIN, HIGH);
+#endif
   PrepareBlueTooth();
   t1 = millis();
   ble_connected = false;
@@ -2012,9 +2021,15 @@ void print_bt_packet() {
       Serial.println("Not connected");
 #endif
       stop_bluetooth();
+#ifdef EXT_BLINK_LED    
+      digitalWrite(YELLOW_LED_PIN, LOW);
+#endif
       return;
     }  
   }
+#ifdef EXT_BLINK_LED    
+  digitalWrite(YELLOW_LED_PIN, LOW);
+#endif
 //  sprintf(dex_data,"%lu %d %d",275584,battery,3900);
 #ifdef INT_BLINK_LED    
   digitalWrite(LED_BUILTIN, HIGH);
@@ -2339,9 +2354,14 @@ void loop() {
     loop_count++;
     if (loop_count > 10) {
       digitalWrite(YELLOW_LED_PIN, HIGH);
+      if (low_battery) 
+        digitalWrite(RED_LED_PIN, HIGH);
       loop_count = 0;
     } 
-    else digitalWrite(YELLOW_LED_PIN, LOW);
+    else {
+      digitalWrite(YELLOW_LED_PIN, LOW);
+      digitalWrite(RED_LED_PIN, LOW);
+    }
 // Зажигаем желтую ламочку
 #endif
   } 
@@ -2437,7 +2457,8 @@ void loop() {
     mesure_battery();
   }
 #ifdef GSM_MODEM
-  check_sms();
+  if (packet_catched || current_channel == 0) 
+    check_sms();
 #endif
   
   if (packet_catched) {
