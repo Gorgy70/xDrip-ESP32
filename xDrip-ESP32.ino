@@ -2,7 +2,7 @@
 #define DEBUG
 //#define INT_BLINK_LED
 #define EXT_BLINK_LED
-#define GSM_MODEM
+//#define GSM_MODEM
 //#define MODEM_SLEEP_DTR
 #define PCB_V1
 //#define PCB_V2
@@ -61,7 +61,7 @@ uint8_t temprature_sens_read();
 #define NUM_CHANNELS        (4)       // Кол-во проверяемых каналов
 #define FIVE_MINUTE         300000    // 5 минут
 #define TWO_MINUTE          120000    // 2 минуты
-#define WAKEUP_BT_TIME      45000     // Время необходимое для просыпания прибора c BT
+#define WAKEUP_BT_TIME      49000     // Время необходимое для просыпания прибора c BT
 #define WAKEUP_NON_BT_TIME  3000      // Время необходимое для просыпания прибора без BT
 #define SPI_TIME_OUT        1000
 
@@ -1852,7 +1852,7 @@ boolean print_wifi_packet() {
   HTTPClient http;
   int httpCode;
   String response;
-  byte i;
+  byte i1,i2;
   String request;
   unsigned long ts;
   boolean ret = false;
@@ -1899,22 +1899,28 @@ boolean print_wifi_packet() {
   digitalWrite(YELLOW_LED_PIN, HIGH);
 #endif
     // wait for WiFi connection
-  i = 0;  
-  WiFi.begin(settings.wifi_ssid,settings.wifi_pwd);
+//  for (i1 = 0; i1 < 3; i1++) {  
+    i2 = 0;  
+    WiFi.begin(settings.wifi_ssid,settings.wifi_pwd);
 #ifdef DEBUG
-    Serial.print("Connecting WiFi: ");
+      Serial.print("Connecting WiFi: ");
 #endif
-  while (WiFi.status() != WL_CONNECTED) {
+    while (WiFi.status() != WL_CONNECTED) {
 #ifdef DEBUG
-    Serial.print(".");
+      Serial.print(".");
 #endif
-    delay(500);
-    i++;
-    if (i == wifi_wait_tyme*2) break;
-    if (WiFi.status() == WL_NO_SSID_AVAIL) break;
-  }
+      delay(500);
+      i2++;
+      if (i2 == wifi_wait_tyme*2) break;
+      if (WiFi.status() == WL_NO_SSID_AVAIL) break;
+    }
+    Serial.println();
+//    if (WiFi.status() == WL_CONNECTED) break;
+//    WiFi.enableSTA(false);
+//  }  
 #ifdef DEBUG
-  Serial.println();
+  Serial.print("WiFi Status = ");
+  Serial.println(WiFi.status());
 #endif
 #ifdef EXT_BLINK_LED    
   digitalWrite(YELLOW_LED_PIN, LOW);
@@ -2040,6 +2046,7 @@ void print_bt_packet() {
   if (settings.bt_format == 1) {
     sprintf(radio_buff,"%lu %d %d\r\n",dex_num_decoder(Pkt.raw),Pkt.battery,battery_milivolts);
     msg_len = strlen(radio_buff);
+    ack_recieved = true;
   }  
   else if (settings.bt_format == 2) { 
     msg.cmd_code = 0x00;
@@ -2063,6 +2070,7 @@ void print_bt_packet() {
     memcpy(&radio_buff[12],&msg.dex_src_id , 4);
     radio_buff[16] = msg.function;
     msg_len = sizeof(msg);
+    ack_recieved = false;
   }
   esp_err_t ret = esp_ble_gatts_send_indicate(ble_gatts_if, ble_conn_id, ble_attr_handle, msg_len,(uint8_t*)&radio_buff[0], false); 
 #ifdef DEBUG
@@ -2074,7 +2082,6 @@ void print_bt_packet() {
   }  
 #endif
   t1 = millis();
-  ack_recieved = false;
   while (!ack_recieved) {
     delay(200);
     if (millis() - t1 > WAKEUP_BT_TIME) break;
@@ -2174,18 +2181,25 @@ void HandleWebClient() {
 
 void stop_bluetooth() {
   esp_bluedroid_status_t stat;
-  
-  stat = esp_bluedroid_get_status();
-  if (stat == ESP_BLUEDROID_STATUS_ENABLED) {
-    esp_bluedroid_disable();
-    delay(500);
+
+  try {
     stat = esp_bluedroid_get_status();
-  }  
-  if (stat == ESP_BLUEDROID_STATUS_INITIALIZED) {
-    esp_bluedroid_deinit();
-    delay(500);
-  }  
-  btStop();  
+    if (stat == ESP_BLUEDROID_STATUS_ENABLED) {
+      esp_bluedroid_disable();
+      delay(1000);
+      stat = esp_bluedroid_get_status();
+    }  
+    if (stat == ESP_BLUEDROID_STATUS_INITIALIZED) {
+      esp_bluedroid_deinit();
+      delay(1000);
+    }  
+    btStop();  
+    delay(1000);
+  } catch (...) {
+#ifdef DEBUG
+    Serial.println("Error on stoping BT");      
+#endif
+  }
   ble_gatts_if = ESP_GATT_IF_NONE;
   ble_conn_id = 0;
 }
