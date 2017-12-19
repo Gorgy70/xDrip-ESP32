@@ -7,9 +7,10 @@
 #define PCB_V1
 //#define PCB_V2
 //#define USE_FREQEST    
-
+//#define DEEP_SLEEP
 
 #include <driver/gpio.h>
+#include <soc/rtc.h>
 #include <SPI.h>
 #include <EEPROM.h>
 #include <WiFi.h>
@@ -17,12 +18,12 @@
 #include <bt.h>
 #include <bta_api.h>
 
+#include <esp_system.h>
 #include <esp_wifi.h>
 #include <esp_wifi_types.h>
 #include <esp_gap_ble_api.h>
 #include <esp_gatts_api.h>
 #include <esp_bt_defs.h>
-#include <esp_bt_main.h>
 #include <esp_bt_main.h>
 #include <esp_sleep.h>
 #include <esp_deep_sleep.h>
@@ -153,7 +154,6 @@ byte misses_until_failure = 2;                                                  
 
 byte wifi_wait_tyme = 100; // Время ожидания соединения WiFi в секундах
 byte default_bt_format = 0; // Формат обмена по протколу BlueTooth 0 - None 1 - xDrip, 2 - xBridge
-boolean first_start_app = true; // Флаг запуска приложения
 unsigned int battery_milivolts;
 int battery_percent;
 boolean low_battery = false;
@@ -1598,17 +1598,23 @@ void gsm_get_battery(byte *percent,int *millivolts) {
 #endif
 
 void get_wifi_mac() {
+/*  
   wifi_init_config_t wifi_cfg = WIFI_INIT_CONFIG_DEFAULT();
   esp_wifi_init(&wifi_cfg);
   esp_wifi_set_mode(WIFI_MODE_AP);
   esp_wifi_start();
   esp_wifi_get_mac(WIFI_IF_AP, wifi_mac);
+*/  
+  esp_read_mac(wifi_mac,ESP_MAC_BT );  
 #ifdef DEBUG
   Serial.print("WiFi MAC = ");
-  Serial.println(WiFi.softAPmacAddress());
+  sprintf(radio_buff, "%02X:%02X:%02X:%02X:%02X:%02X", wifi_mac[0], wifi_mac[1], wifi_mac[2], wifi_mac[3], wifi_mac[4], wifi_mac[5]);
+  Serial.println(radio_buff);
 #endif      
+/*
   esp_wifi_stop();
   esp_wifi_deinit();  
+*/  
 }
 
 void setup() {
@@ -1618,11 +1624,14 @@ void setup() {
   byte b1;
 #endif
 
+//  rtc_clk_cpu_freq_set(RTC_CPU_FREQ_80M);
 #ifdef DEBUG
   Serial.begin(115200);
   while (!Serial) {
     ; // wait for serial port to connect. Needed for native USB port only
   }
+  Serial.print("CPU CLOCK = ");
+  Serial.println(rtc_clk_cpu_freq_get());
 #endif
 
   pinMode(SS_PIN, OUTPUT);
@@ -1671,7 +1680,6 @@ void setup() {
 #ifdef DEBUG
     Serial.println("I'am wake up by timer");      
 #endif
-    first_start_app = false;
 #ifdef GSM_MODEM
     digitalWrite(DTR_PIN, HIGH); // Модем должен спать
 // Считаем что с модемом все хорошо    
@@ -1700,7 +1708,6 @@ void setup() {
 #ifdef DEBUG
     Serial.println("It's not wake up. It was turn ON!");      
 #endif
-    first_start_app = true;
     init_CC2500();  // initialise CC2500 registers
 #ifdef DEBUG
     Serial.print("CC2500 PARTNUM=");
@@ -1901,6 +1908,7 @@ boolean print_wifi_packet() {
     // wait for WiFi connection
 //  for (i1 = 0; i1 < 3; i1++) {  
     i2 = 0;  
+    WiFi.disconnect(true);
     WiFi.begin(settings.wifi_ssid,settings.wifi_pwd);
 #ifdef DEBUG
       Serial.print("Connecting WiFi: ");
@@ -2216,7 +2224,18 @@ void esp32_goto_sleep() {
 #endif
   current_time = millis();
   if (next_time - current_time < wake_up_time) return;
+#ifdef DEEP_SLEEP  
   esp_deep_sleep(( next_time - current_time - wake_up_time)*1000);
+#else  
+  esp_sleep_enable_timer_wakeup(( next_time - current_time - wake_up_time)*1000);
+  esp_light_sleep_start();
+  current_channel = -1;
+  packet_catched = false;
+  len_pin_low = true;
+  gdo0_status = 0;
+  loop_count = 0;
+  mesure_battery();
+#endif
   
 }
 
