@@ -1146,7 +1146,7 @@ void PrepareBlueTooth() {
     
     esp_err_t ret;
     /* initialize BLE and bluedroid */
-    btStart();
+//    btStart();
     ret = esp_bluedroid_init();
     if (ret) {
 #ifdef DEBUG
@@ -1161,6 +1161,13 @@ void PrepareBlueTooth() {
 #endif      
       return;
     }
+// Установим мощность передатчика BT
+    ret = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT,ESP_PWR_LVL_N11);
+#ifdef DEBUG
+    if (ret) {
+      Serial.println("esp_ble_tx_power_set failed");
+    }
+#endif      
     /* set BLE name and broadcast advertising info
     so that the world can see you*/
     if (settings.bt_format == 1) {
@@ -1624,7 +1631,7 @@ void setup() {
   byte b1;
 #endif
 
-//  rtc_clk_cpu_freq_set(RTC_CPU_FREQ_80M);
+  rtc_clk_cpu_freq_set(RTC_CPU_FREQ_80M);
 #ifdef DEBUG
   Serial.begin(115200);
   while (!Serial) {
@@ -2201,8 +2208,8 @@ void stop_bluetooth() {
       esp_bluedroid_deinit();
       delay(1000);
     }  
-    btStop();  
-    delay(1000);
+//    btStop();  
+//    delay(1000);
   } catch (...) {
 #ifdef DEBUG
     Serial.println("Error on stoping BT");      
