@@ -7,26 +7,29 @@
 #define PCB_V1
 //#define PCB_V2
 //#define USE_FREQEST    
-//#define DEEP_SLEEP
+#define DEEP_SLEEP_MODE
 
-#include <driver/gpio.h>
-#include <soc/rtc.h>
-#include <SPI.h>
-#include <EEPROM.h>
-#include <WiFi.h>
-#include <HTTPClient.h>
-#include <bt.h>
-#include <bta_api.h>
+#include "driver/gpio.h"
+#include "soc/rtc_cntl_reg.h"
+#include "driver/rtc_cntl.h"
+#include "soc/rtc.h"
+#include "rom/rtc.h"
+#include "SPI.h"
+#include "EEPROM.h"
+#include "WiFi.h"
+#include "HTTPClient.h"
+#include "bt.h"
+#include "bta_api.h"
 
-#include <esp_system.h>
-#include <esp_wifi.h>
-#include <esp_wifi_types.h>
-#include <esp_gap_ble_api.h>
-#include <esp_gatts_api.h>
-#include <esp_bt_defs.h>
-#include <esp_bt_main.h>
-#include <esp_sleep.h>
-#include <esp_deep_sleep.h>
+#include "esp_system.h"
+#include "esp_wifi.h"
+#include "esp_wifi_types.h"
+#include "esp_gap_ble_api.h"
+#include "esp_gatts_api.h"
+#include "esp_bt_defs.h"
+#include "esp_bt_main.h"
+#include "esp_sleep.h"
+#include "esp_deep_sleep.h"
 
 #include "cc2500_REG.h"
 #include "webform.h"
@@ -100,6 +103,8 @@ int      BATTERY_MINIMUM  =   VMIN*ANALOG_RESOLUTION*R2/(R1+R2)/VREF ; //678 3.0
 
 // defines the xBridge protocol functional level.  Sent in each packet as the last byte.
 #define DEXBRIDGE_PROTO_LEVEL (0x01)
+
+portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 
 unsigned long dex_tx_id;
 char transmitter_id[] = "ABCDE";
@@ -669,7 +674,7 @@ char ReadReg(char addr) {
   while (digitalRead(MISO_PIN) == HIGH) {
     if (millis() - t1 > SPI_TIME_OUT) {
 #ifdef DEBUG
-      Serial.println("SPI timeout"); 
+      Serial.println("ReadReg SPI timeout"); 
 #endif
       break;
     }
@@ -690,7 +695,7 @@ char ReadStatus(char addr) {
   while (digitalRead(MISO_PIN) == HIGH) {
     if (millis() - t1 > SPI_TIME_OUT) {
 #ifdef DEBUG
-      Serial.println("SPI timeout"); 
+      Serial.println("Read Status SPI timeout"); 
 #endif
       break;
     }
@@ -1631,7 +1636,9 @@ void setup() {
   byte b1;
 #endif
 
+  enable_WDT(1);
   rtc_clk_cpu_freq_set(RTC_CPU_FREQ_80M);
+  disable_WDT();
 #ifdef DEBUG
   Serial.begin(115200);
   while (!Serial) {
@@ -1683,6 +1690,12 @@ void setup() {
   digitalWrite(SS_PIN, HIGH);
   
   wake_up = esp_deep_sleep_get_wakeup_cause();
+  if (rtc_get_reset_reason(0) == RTCWDT_RTC_RESET) {
+    wake_up = ESP_DEEP_SLEEP_WAKEUP_TIMER;
+#ifdef DEBUG
+    Serial.println("Reset by WDT");      
+#endif    
+  }
   if (wake_up == ESP_DEEP_SLEEP_WAKEUP_TIMER) {
 #ifdef DEBUG
     Serial.println("I'am wake up by timer");      
@@ -1777,6 +1790,9 @@ byte ReadRadioBuffer() {
   byte i;
   byte rxbytes;  
 
+#ifdef DEBUG
+  Serial.println("ReadRadioBuffer start");
+#endif
   memset (&radio_buff, 0, sizeof (Dexcom_packet));
   if (radioCrcPassed()) {
     len = ReadStatus(RXBYTES);
@@ -2231,7 +2247,7 @@ void esp32_goto_sleep() {
 #endif
   current_time = millis();
   if (next_time - current_time < wake_up_time) return;
-#ifdef DEEP_SLEEP  
+#ifdef DEEP_SLEEP_MODE  
   esp_deep_sleep(( next_time - current_time - wake_up_time)*1000);
 #else  
   esp_sleep_enable_timer_wakeup(( next_time - current_time - wake_up_time)*1000);
@@ -2239,7 +2255,9 @@ void esp32_goto_sleep() {
   current_channel = -1;
   packet_catched = false;
   len_pin_low = true;
+  portENTER_CRITICAL(&mux);
   gdo0_status = 0;
+  portEXIT_CRITICAL(&mux);
   loop_count = 0;
   mesure_battery();
 #endif
@@ -2284,6 +2302,43 @@ void light_sleep(unsigned long time_ms) {
     Serial.println(err);
   }  
 #endif  
+}
+
+void feed_WDT() {
+  REG_WRITE(RTC_CNTL_WDTWPROTECT_REG,RTC_CNTL_WDT_WKEY_VALUE);
+  REG_WRITE(RTC_CNTL_WDTFEED_REG,RTC_CNTL_WDT_FEED_M);
+  REG_WRITE(RTC_CNTL_WDTWPROTECT_REG,0);
+}
+
+void disable_WDT() {
+  unsigned long reg;
+
+  REG_WRITE(RTC_CNTL_WDTWPROTECT_REG,RTC_CNTL_WDT_WKEY_VALUE);
+
+  reg = (1 << RTC_CNTL_WDT_SYS_RESET_LENGTH_S) |
+        (1 << RTC_CNTL_WDT_CPU_RESET_LENGTH_S) | RTC_CNTL_WDT_PAUSE_IN_SLP_M;
+  REG_WRITE(RTC_CNTL_WDTCONFIG0_REG,reg);
+  
+  REG_WRITE(RTC_CNTL_WDTWPROTECT_REG,0);
+}
+
+void enable_WDT(int time_s) {
+  unsigned long reg;
+
+  REG_WRITE(RTC_CNTL_WDTWPROTECT_REG,RTC_CNTL_WDT_WKEY_VALUE);
+    
+  reg = RTC_CNTL_WDT_EN_M | 
+        RTC_CNTL_WDT_FLASHBOOT_MOD_EN_M |
+        (RTC_WDT_STG_SEL_RESET_SYSTEM << RTC_CNTL_WDT_STG0_S) | 
+        (RTC_WDT_STG_SEL_RESET_RTC << RTC_CNTL_WDT_STG1_S) |
+        (1 << RTC_CNTL_WDT_SYS_RESET_LENGTH_S) |
+        (1 << RTC_CNTL_WDT_CPU_RESET_LENGTH_S) | 
+        RTC_CNTL_WDT_PAUSE_IN_SLP_M;
+
+  REG_WRITE(RTC_CNTL_WDTCONFIG0_REG,reg);
+  REG_WRITE(RTC_CNTL_WDTCONFIG1_REG, rtc_clk_slow_freq_get_hz() * time_s);
+  
+  REG_WRITE(RTC_CNTL_WDTWPROTECT_REG,0);
 }
 
 void loop() {
@@ -2344,6 +2399,7 @@ void loop() {
   old_channel = current_channel;
   if (current_channel < 0) {
     current_channel = 0;
+    enable_WDT(1);
   }
   if (current_channel > 0 && current_time - cc2500_start_time > waitTimes[current_channel]) {
     current_channel++;
@@ -2352,6 +2408,7 @@ void loop() {
 #ifdef GSM_MODEM
       check_sms();
 #endif
+      enable_WDT(1);
     }
   }  
 
@@ -2387,6 +2444,7 @@ void loop() {
 #endif
 */
   if (current_channel == 0) {
+    feed_WDT();
     light_sleep(100);
     delay(1);
     packet_on_board = ReadStatus(RXBYTES);   
@@ -2406,13 +2464,22 @@ void loop() {
 #endif
   } 
   else packet_on_board = gdo0_status;
-  if (packet_on_board) {
-    while (digitalRead(GDO0_PIN) == HIGH) {
-    // Идет прием пакета
-    }
-  }
   
-  if (!packet_on_board) return; // Нет сигнала от декскома - выходим из цикла
+  if (packet_on_board) {
+#ifdef DEBUG
+    Serial.print("Packet on board!");
+#endif
+    unsigned long t1 = millis();
+    while (digitalRead(GDO0_PIN) == HIGH) {
+      if (millis() - t1 > SPI_TIME_OUT) {
+#ifdef DEBUG
+        Serial.println("packet_on_board SPI timeout"); 
+#endif
+        break;
+      }
+    }
+    if (current_channel == 0) disable_WDT();
+  } else return; // Нет сигнала от декскома - выходим из цикла
 
 #ifdef INT_BLINK_LED
   digitalWrite(LED_BUILTIN, LOW);
@@ -2457,7 +2524,9 @@ void loop() {
   } 
   else {
     current_channel++;
-    if (current_channel > 3) current_channel = 0;
+    if (current_channel > 3) {
+      current_channel = 0;
+    }
     cc2500_start_time = current_time;
     swap_channel(nChannels[current_channel], fOffset[current_channel]);
 #ifdef DEBUG
@@ -2469,7 +2538,9 @@ void loop() {
     Serial.println(cc2500_start_time);
 #endif
   }
+  portENTER_CRITICAL(&mux);
   gdo0_status = 0;
+  portEXIT_CRITICAL(&mux);
   
   if (packet_catched)
   {
@@ -2500,6 +2571,8 @@ void loop() {
   if (packet_catched || current_channel == 0) 
     check_sms();
 #endif
+  if (!packet_catched && current_channel == 0) 
+    enable_WDT(1);
   
   if (packet_catched) {
     esp32_goto_sleep();    
@@ -2507,6 +2580,8 @@ void loop() {
 }
 
 void gdo0_pin_up() {
+  portENTER_CRITICAL_ISR(&mux);
   gdo0_status = 1;  
+  portEXIT_CRITICAL_ISR(&mux);
 }
 
