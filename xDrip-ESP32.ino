@@ -2,30 +2,34 @@
 #define DEBUG
 //#define INT_BLINK_LED
 #define EXT_BLINK_LED
-#define GSM_MODEM
+//#define GSM_MODEM
 //#define MODEM_SLEEP_DTR
 #define PCB_V1
 //#define PCB_V2
 //#define USE_FREQEST    
+#define DEEP_SLEEP_MODE
 
+#include "driver/gpio.h"
+#include "soc/rtc_cntl_reg.h"
+#include "driver/rtc_cntl.h"
+#include "soc/rtc.h"
+#include "rom/rtc.h"
+#include "SPI.h"
+#include "EEPROM.h"
+#include "WiFi.h"
+#include "HTTPClient.h"
+#include "bt.h"
+#include "bta_api.h"
 
-#include <driver/gpio.h>
-#include <SPI.h>
-#include <EEPROM.h>
-#include <WiFi.h>
-#include <HTTPClient.h>
-#include <bt.h>
-#include <bta_api.h>
-
-#include <esp_wifi.h>
-#include <esp_wifi_types.h>
-#include <esp_gap_ble_api.h>
-#include <esp_gatts_api.h>
-#include <esp_bt_defs.h>
-#include <esp_bt_main.h>
-#include <esp_bt_main.h>
-#include <esp_sleep.h>
-#include <esp_deep_sleep.h>
+#include "esp_system.h"
+#include "esp_wifi.h"
+#include "esp_wifi_types.h"
+#include "esp_gap_ble_api.h"
+#include "esp_gatts_api.h"
+#include "esp_bt_defs.h"
+#include "esp_bt_main.h"
+#include "esp_sleep.h"
+#include "esp_deep_sleep.h"
 
 #include "cc2500_REG.h"
 #include "webform.h"
@@ -61,7 +65,7 @@ uint8_t temprature_sens_read();
 #define NUM_CHANNELS        (4)       // Кол-во проверяемых каналов
 #define FIVE_MINUTE         300000    // 5 минут
 #define TWO_MINUTE          120000    // 2 минуты
-#define WAKEUP_BT_TIME      45000     // Время необходимое для просыпания прибора c BT
+#define WAKEUP_BT_TIME      49000     // Время необходимое для просыпания прибора c BT
 #define WAKEUP_NON_BT_TIME  3000      // Время необходимое для просыпания прибора без BT
 #define SPI_TIME_OUT        1000
 
@@ -155,7 +159,6 @@ byte misses_until_failure = 2;                                                  
 
 byte wifi_wait_tyme = 100; // Время ожидания соединения WiFi в секундах
 byte default_bt_format = 0; // Формат обмена по протколу BlueTooth 0 - None 1 - xDrip, 2 - xBridge
-boolean first_start_app = true; // Флаг запуска приложения
 unsigned int battery_milivolts;
 int battery_percent;
 boolean low_battery = false;
@@ -671,7 +674,7 @@ char ReadReg(char addr) {
   while (digitalRead(MISO_PIN) == HIGH) {
     if (millis() - t1 > SPI_TIME_OUT) {
 #ifdef DEBUG
-      Serial.println("SPI timeout"); 
+      Serial.println("ReadReg SPI timeout"); 
 #endif
       break;
     }
@@ -692,7 +695,7 @@ char ReadStatus(char addr) {
   while (digitalRead(MISO_PIN) == HIGH) {
     if (millis() - t1 > SPI_TIME_OUT) {
 #ifdef DEBUG
-      Serial.println("SPI timeout"); 
+      Serial.println("Read Status SPI timeout"); 
 #endif
       break;
     }
@@ -1163,6 +1166,13 @@ void PrepareBlueTooth() {
 #endif      
       return;
     }
+// Установим мощность передатчика BT
+    ret = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT,ESP_PWR_LVL_N11);
+#ifdef DEBUG
+    if (ret) {
+      Serial.println("esp_ble_tx_power_set failed");
+    }
+#endif      
     /* set BLE name and broadcast advertising info
     so that the world can see you*/
     if (settings.bt_format == 1) {
@@ -1600,17 +1610,23 @@ void gsm_get_battery(byte *percent,int *millivolts) {
 #endif
 
 void get_wifi_mac() {
+/*  
   wifi_init_config_t wifi_cfg = WIFI_INIT_CONFIG_DEFAULT();
   esp_wifi_init(&wifi_cfg);
   esp_wifi_set_mode(WIFI_MODE_AP);
   esp_wifi_start();
   esp_wifi_get_mac(WIFI_IF_AP, wifi_mac);
+*/  
+  esp_read_mac(wifi_mac,ESP_MAC_BT );  
 #ifdef DEBUG
   Serial.print("WiFi MAC = ");
-  Serial.println(WiFi.softAPmacAddress());
+  sprintf(radio_buff, "%02X:%02X:%02X:%02X:%02X:%02X", wifi_mac[0], wifi_mac[1], wifi_mac[2], wifi_mac[3], wifi_mac[4], wifi_mac[5]);
+  Serial.println(radio_buff);
 #endif      
+/*
   esp_wifi_stop();
   esp_wifi_deinit();  
+*/  
 }
 
 void setup() {
@@ -1620,11 +1636,16 @@ void setup() {
   byte b1;
 #endif
 
+  enable_WDT(1);
+  rtc_clk_cpu_freq_set(RTC_CPU_FREQ_80M);
+  disable_WDT();
 #ifdef DEBUG
   Serial.begin(115200);
   while (!Serial) {
     ; // wait for serial port to connect. Needed for native USB port only
   }
+  Serial.print("CPU CLOCK = ");
+  Serial.println(rtc_clk_cpu_freq_get());
 #endif
 
   pinMode(SS_PIN, OUTPUT);
@@ -1669,11 +1690,16 @@ void setup() {
   digitalWrite(SS_PIN, HIGH);
   
   wake_up = esp_deep_sleep_get_wakeup_cause();
+  if (rtc_get_reset_reason(0) == RTCWDT_RTC_RESET) {
+    wake_up = ESP_DEEP_SLEEP_WAKEUP_TIMER;
+#ifdef DEBUG
+    Serial.println("Reset by WDT");      
+#endif    
+  }
   if (wake_up == ESP_DEEP_SLEEP_WAKEUP_TIMER) {
 #ifdef DEBUG
     Serial.println("I'am wake up by timer");      
 #endif
-    first_start_app = false;
 #ifdef GSM_MODEM
     digitalWrite(DTR_PIN, HIGH); // Модем должен спать
 // Считаем что с модемом все хорошо    
@@ -1702,7 +1728,6 @@ void setup() {
 #ifdef DEBUG
     Serial.println("It's not wake up. It was turn ON!");      
 #endif
-    first_start_app = true;
     init_CC2500();  // initialise CC2500 registers
 #ifdef DEBUG
     Serial.print("CC2500 PARTNUM=");
@@ -1765,6 +1790,9 @@ byte ReadRadioBuffer() {
   byte i;
   byte rxbytes;  
 
+#ifdef DEBUG
+  Serial.println("ReadRadioBuffer start");
+#endif
   memset (&radio_buff, 0, sizeof (Dexcom_packet));
   if (radioCrcPassed()) {
     len = ReadStatus(RXBYTES);
@@ -1854,7 +1882,7 @@ boolean print_wifi_packet() {
   HTTPClient http;
   int httpCode;
   String response;
-  byte i;
+  byte i1,i2;
   String request;
   unsigned long ts;
   boolean ret = false;
@@ -1901,22 +1929,29 @@ boolean print_wifi_packet() {
   digitalWrite(YELLOW_LED_PIN, HIGH);
 #endif
     // wait for WiFi connection
-  i = 0;  
-  WiFi.begin(settings.wifi_ssid,settings.wifi_pwd);
+//  for (i1 = 0; i1 < 3; i1++) {  
+    i2 = 0;  
+    WiFi.disconnect(true);
+    WiFi.begin(settings.wifi_ssid,settings.wifi_pwd);
 #ifdef DEBUG
-    Serial.print("Connecting WiFi: ");
+      Serial.print("Connecting WiFi: ");
 #endif
-  while (WiFi.status() != WL_CONNECTED) {
+    while (WiFi.status() != WL_CONNECTED) {
 #ifdef DEBUG
-    Serial.print(".");
+      Serial.print(".");
 #endif
-    delay(500);
-    i++;
-    if (i == wifi_wait_tyme*2) break;
-    if (WiFi.status() == WL_NO_SSID_AVAIL) break;
-  }
+      delay(500);
+      i2++;
+      if (i2 == wifi_wait_tyme*2) break;
+      if (WiFi.status() == WL_NO_SSID_AVAIL) break;
+    }
+    Serial.println();
+//    if (WiFi.status() == WL_CONNECTED) break;
+//    WiFi.enableSTA(false);
+//  }  
 #ifdef DEBUG
-  Serial.println();
+  Serial.print("WiFi Status = ");
+  Serial.println(WiFi.status());
 #endif
 #ifdef EXT_BLINK_LED    
   digitalWrite(YELLOW_LED_PIN, LOW);
@@ -2042,6 +2077,7 @@ void print_bt_packet() {
   if (settings.bt_format == 1) {
     sprintf(radio_buff,"%lu %d %d\r\n",dex_num_decoder(Pkt.raw),Pkt.battery,battery_milivolts);
     msg_len = strlen(radio_buff);
+    ack_recieved = true;
   }  
   else if (settings.bt_format == 2) { 
     msg.cmd_code = 0x00;
@@ -2065,6 +2101,7 @@ void print_bt_packet() {
     memcpy(&radio_buff[12],&msg.dex_src_id , 4);
     radio_buff[16] = msg.function;
     msg_len = sizeof(msg);
+    ack_recieved = false;
   }
   esp_err_t ret = esp_ble_gatts_send_indicate(ble_gatts_if, ble_conn_id, ble_attr_handle, msg_len,(uint8_t*)&radio_buff[0], false); 
 #ifdef DEBUG
@@ -2076,7 +2113,6 @@ void print_bt_packet() {
   }  
 #endif
   t1 = millis();
-  ack_recieved = false;
   while (!ack_recieved) {
     delay(200);
     if (millis() - t1 > WAKEUP_BT_TIME) break;
@@ -2176,21 +2212,24 @@ void HandleWebClient() {
 
 void stop_bluetooth() {
   esp_bluedroid_status_t stat;
-  
+
   try {
     stat = esp_bluedroid_get_status();
     if (stat == ESP_BLUEDROID_STATUS_ENABLED) {
       esp_bluedroid_disable();
-      delay(500);
-     stat = esp_bluedroid_get_status();
-    }   
+      delay(1000);
+      stat = esp_bluedroid_get_status();
+    }  
     if (stat == ESP_BLUEDROID_STATUS_INITIALIZED) {
       esp_bluedroid_deinit();
-      delay(500);
+      delay(1000);
     }  
 //    btStop();  
-  } catch(...) {
-      
+//    delay(1000);
+  } catch (...) {
+#ifdef DEBUG
+    Serial.println("Error on stoping BT");      
+#endif
   }
   ble_gatts_if = ESP_GATT_IF_NONE;
   ble_conn_id = 0;
@@ -2208,7 +2247,20 @@ void esp32_goto_sleep() {
 #endif
   current_time = millis();
   if (next_time - current_time < wake_up_time) return;
+#ifdef DEEP_SLEEP_MODE  
   esp_deep_sleep(( next_time - current_time - wake_up_time)*1000);
+#else  
+  esp_sleep_enable_timer_wakeup(( next_time - current_time - wake_up_time)*1000);
+  esp_light_sleep_start();
+  current_channel = -1;
+  packet_catched = false;
+  len_pin_low = true;
+  portENTER_CRITICAL(&mux);
+  gdo0_status = 0;
+  portEXIT_CRITICAL(&mux);
+  loop_count = 0;
+  mesure_battery();
+#endif
   
 }
 
@@ -2250,6 +2302,43 @@ void light_sleep(unsigned long time_ms) {
     Serial.println(err);
   }  
 #endif  
+}
+
+void feed_WDT() {
+  REG_WRITE(RTC_CNTL_WDTWPROTECT_REG,RTC_CNTL_WDT_WKEY_VALUE);
+  REG_WRITE(RTC_CNTL_WDTFEED_REG,RTC_CNTL_WDT_FEED_M);
+  REG_WRITE(RTC_CNTL_WDTWPROTECT_REG,0);
+}
+
+void disable_WDT() {
+  unsigned long reg;
+
+  REG_WRITE(RTC_CNTL_WDTWPROTECT_REG,RTC_CNTL_WDT_WKEY_VALUE);
+
+  reg = (1 << RTC_CNTL_WDT_SYS_RESET_LENGTH_S) |
+        (1 << RTC_CNTL_WDT_CPU_RESET_LENGTH_S) | RTC_CNTL_WDT_PAUSE_IN_SLP_M;
+  REG_WRITE(RTC_CNTL_WDTCONFIG0_REG,reg);
+  
+  REG_WRITE(RTC_CNTL_WDTWPROTECT_REG,0);
+}
+
+void enable_WDT(int time_s) {
+  unsigned long reg;
+
+  REG_WRITE(RTC_CNTL_WDTWPROTECT_REG,RTC_CNTL_WDT_WKEY_VALUE);
+    
+  reg = RTC_CNTL_WDT_EN_M | 
+        RTC_CNTL_WDT_FLASHBOOT_MOD_EN_M |
+        (RTC_WDT_STG_SEL_RESET_SYSTEM << RTC_CNTL_WDT_STG0_S) | 
+        (RTC_WDT_STG_SEL_RESET_RTC << RTC_CNTL_WDT_STG1_S) |
+        (1 << RTC_CNTL_WDT_SYS_RESET_LENGTH_S) |
+        (1 << RTC_CNTL_WDT_CPU_RESET_LENGTH_S) | 
+        RTC_CNTL_WDT_PAUSE_IN_SLP_M;
+
+  REG_WRITE(RTC_CNTL_WDTCONFIG0_REG,reg);
+  REG_WRITE(RTC_CNTL_WDTCONFIG1_REG, rtc_clk_slow_freq_get_hz() * time_s);
+  
+  REG_WRITE(RTC_CNTL_WDTWPROTECT_REG,0);
 }
 
 void loop() {
@@ -2310,6 +2399,7 @@ void loop() {
   old_channel = current_channel;
   if (current_channel < 0) {
     current_channel = 0;
+    enable_WDT(1);
   }
   if (current_channel > 0 && current_time - cc2500_start_time > waitTimes[current_channel]) {
     current_channel++;
@@ -2318,6 +2408,7 @@ void loop() {
 #ifdef GSM_MODEM
       check_sms();
 #endif
+      enable_WDT(1);
     }
   }  
 
@@ -2353,6 +2444,7 @@ void loop() {
 #endif
 */
   if (current_channel == 0) {
+    feed_WDT();
     light_sleep(100);
     delay(1);
     packet_on_board = ReadStatus(RXBYTES);   
@@ -2372,13 +2464,22 @@ void loop() {
 #endif
   } 
   else packet_on_board = gdo0_status;
-  if (packet_on_board) {
-    while (digitalRead(GDO0_PIN) == HIGH) {
-    // Идет прием пакета
-    }
-  }
   
-  if (!packet_on_board) return; // Нет сигнала от декскома - выходим из цикла
+  if (packet_on_board) {
+#ifdef DEBUG
+    Serial.print("Packet on board!");
+#endif
+    unsigned long t1 = millis();
+    while (digitalRead(GDO0_PIN) == HIGH) {
+      if (millis() - t1 > SPI_TIME_OUT) {
+#ifdef DEBUG
+        Serial.println("packet_on_board SPI timeout"); 
+#endif
+        break;
+      }
+    }
+    if (current_channel == 0) disable_WDT();
+  } else return; // Нет сигнала от декскома - выходим из цикла
 
 #ifdef INT_BLINK_LED
   digitalWrite(LED_BUILTIN, LOW);
@@ -2423,7 +2524,9 @@ void loop() {
   } 
   else {
     current_channel++;
-    if (current_channel > 3) current_channel = 0;
+    if (current_channel > 3) {
+      current_channel = 0;
+    }
     cc2500_start_time = current_time;
     swap_channel(nChannels[current_channel], fOffset[current_channel]);
 #ifdef DEBUG
@@ -2435,7 +2538,9 @@ void loop() {
     Serial.println(cc2500_start_time);
 #endif
   }
+  portENTER_CRITICAL(&mux);
   gdo0_status = 0;
+  portEXIT_CRITICAL(&mux);
   
   if (packet_catched)
   {
@@ -2466,6 +2571,8 @@ void loop() {
   if (packet_catched || current_channel == 0) 
     check_sms();
 #endif
+  if (!packet_catched && current_channel == 0) 
+    enable_WDT(1);
   
   if (packet_catched) {
     esp32_goto_sleep();    
