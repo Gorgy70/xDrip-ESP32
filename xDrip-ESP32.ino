@@ -100,6 +100,8 @@ int      BATTERY_MINIMUM  =   VMIN*ANALOG_RESOLUTION*R2/(R1+R2)/VREF ; //678 3.0
 // defines the xBridge protocol functional level.  Sent in each packet as the last byte.
 #define DEXBRIDGE_PROTO_LEVEL (0x01)
 
+portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+
 unsigned long dex_tx_id;
 char transmitter_id[] = "ABCDE";
 
@@ -1146,7 +1148,7 @@ void PrepareBlueTooth() {
     
     esp_err_t ret;
     /* initialize BLE and bluedroid */
-    btStart();
+//    btStart();
     ret = esp_bluedroid_init();
     if (ret) {
 #ifdef DEBUG
@@ -2175,17 +2177,21 @@ void HandleWebClient() {
 void stop_bluetooth() {
   esp_bluedroid_status_t stat;
   
-  stat = esp_bluedroid_get_status();
-  if (stat == ESP_BLUEDROID_STATUS_ENABLED) {
-    esp_bluedroid_disable();
-    delay(500);
+  try {
     stat = esp_bluedroid_get_status();
-  }  
-  if (stat == ESP_BLUEDROID_STATUS_INITIALIZED) {
-    esp_bluedroid_deinit();
-    delay(500);
-  }  
-  btStop();  
+    if (stat == ESP_BLUEDROID_STATUS_ENABLED) {
+      esp_bluedroid_disable();
+      delay(500);
+     stat = esp_bluedroid_get_status();
+    }   
+    if (stat == ESP_BLUEDROID_STATUS_INITIALIZED) {
+      esp_bluedroid_deinit();
+      delay(500);
+    }  
+//    btStop();  
+  } catch(...) {
+      
+  }
   ble_gatts_if = ESP_GATT_IF_NONE;
   ble_conn_id = 0;
 }
@@ -2467,6 +2473,8 @@ void loop() {
 }
 
 void gdo0_pin_up() {
+  portENTER_CRITICAL_ISR(&mux);
   gdo0_status = 1;  
+  portEXIT_CRITICAL_ISR(&mux);
 }
 
