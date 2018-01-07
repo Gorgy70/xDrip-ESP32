@@ -66,7 +66,7 @@ uint8_t temprature_sens_read();
 #define FIVE_MINUTE         300000    // 5 минут
 #define TWO_MINUTE          120000    // 2 минуты
 #define WAKEUP_BT_TIME      49000     // Время необходимое для просыпания прибора c BT
-#define WAKEUP_NON_BT_TIME  3000      // Время необходимое для просыпания прибора без BT
+#define WAKEUP_NON_BT_TIME  5000      // Время необходимое для просыпания прибора без BT
 #define SPI_TIME_OUT        1000
 
 #define RADIO_BUFFER_LEN 200 // Размер буфера для приема данных от радиомодуля
@@ -144,7 +144,7 @@ byte fOffset[NUM_CHANNELS] = { 0x00, 0x00, 0x00, 0x00 };
 byte fOffset[NUM_CHANNELS] = { 0xE4, 0xE3, 0xE2, 0xE2 };
 #endif
 byte nChannels[NUM_CHANNELS] = { 0, 100, 199, 209 };
-unsigned long waitTimes[NUM_CHANNELS] = { 0, 600, 600, 600 };
+unsigned long waitTimes[NUM_CHANNELS] = { 0, 550, 550, 550 };
 
 byte sequential_missed_packets = 0;
 byte wait_after_time = 100;
@@ -1050,7 +1050,8 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
     case ESP_GATTS_DISCONNECT_EVT: {
         ble_gatts_if = ESP_GATT_IF_NONE;
         ble_conn_id = 0;
-        esp_ble_gap_start_advertising(&ble_adv_params);
+        ble_connected = false;
+//        esp_ble_gap_start_advertising(&ble_adv_params);
 #ifdef DEBUG
         Serial.println("BLE DISCONECT");
 #endif      
@@ -1151,7 +1152,7 @@ void PrepareBlueTooth() {
     
     esp_err_t ret;
     /* initialize BLE and bluedroid */
-//    btStart();
+    btStart();
     ret = esp_bluedroid_init();
     if (ret) {
 #ifdef DEBUG
@@ -1167,7 +1168,10 @@ void PrepareBlueTooth() {
       return;
     }
 // Установим мощность передатчика BT
-    ret = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT,ESP_PWR_LVL_N11);
+    ret = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT,ESP_PWR_LVL_N14);
+    ret = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV,ESP_PWR_LVL_N14);
+//    ret = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT,ESP_PWR_LVL_N11);
+//    ret = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT,ESP_PWR_LVL_N8);
 #ifdef DEBUG
     if (ret) {
       Serial.println("esp_ble_tx_power_set failed");
@@ -2216,16 +2220,43 @@ void stop_bluetooth() {
   try {
     stat = esp_bluedroid_get_status();
     if (stat == ESP_BLUEDROID_STATUS_ENABLED) {
+#ifdef DEBUG
+      Serial.println("bluedroid_disable start");      
+#endif
       esp_bluedroid_disable();
-      delay(1000);
+      delay(500);
+      while (ble_connected) {
+        delay(100);       
+      }
+#ifdef DEBUG
+      Serial.println("bluedroid_disable end");      
+#endif
       stat = esp_bluedroid_get_status();
     }  
     if (stat == ESP_BLUEDROID_STATUS_INITIALIZED) {
+#ifdef DEBUG
+      Serial.println("bluedroid_deinit start");      
+#endif
       esp_bluedroid_deinit();
       delay(1000);
+      while (ble_connected) {
+        delay(100);       
+      }
+#ifdef DEBUG
+      Serial.println("bluedroid_deinit end");      
+#endif
     }  
-//    btStop();  
-//    delay(1000);
+#ifdef DEBUG
+    Serial.println("btStop start");      
+#endif
+    btStop();  
+    delay(1000);
+    while (ble_connected) {
+      delay(100);       
+    }
+#ifdef DEBUG
+    Serial.println("btStop end");      
+#endif
   } catch (...) {
 #ifdef DEBUG
     Serial.println("Error on stoping BT");      
