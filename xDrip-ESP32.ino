@@ -1007,19 +1007,19 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
         Serial.print("byte 2 = ");
         Serial.println(dexderip_data[1],HEX);
 #endif      
-        if (param->write.len = 0x2 && dexderip_data[0] == 0x1 && dexderip_data[1] == 0x0) {
+        if (param->write.len == 0x2 && dexderip_data[0] == 0x1 && dexderip_data[1] == 0x0) {
           ble_connected = true;
 #ifdef DEBUG
           Serial.println("BLE connected");
 #endif                
         }
-        if (param->write.len = 0x2 && dexderip_data[0] == 0x2 && dexderip_data[1] == 0xF0) {
+        if (param->write.len == 0x2 && dexderip_data[0] == 0x2 && dexderip_data[1] == 0xF0) {
           ack_recieved = true;
 #ifdef DEBUG
           Serial.println("Data Acknowledge Packet");
 #endif                
         }
-        if (param->write.len = 0x6 && dexderip_data[0] == 0x6 && dexderip_data[1] == 0x01) {
+        if (param->write.len == 0x6 && dexderip_data[0] == 0x6 && dexderip_data[1] == 0x01) {
           memcpy(&dex_tx_id,&dexderip_data[2],4);
           settings.dex_tx_id = dex_tx_id;
           new_dex_id_recieved = true;
