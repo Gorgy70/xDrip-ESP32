@@ -1,11 +1,12 @@
 
-#define DEBUG
+//#define DEBUG
 //#define INT_BLINK_LED
 #define EXT_BLINK_LED
-//#define GSM_MODEM
+#define GSM_MODEM
 //#define MODEM_SLEEP_DTR
 #define PCB_V1
 //#define PCB_V2
+//#define PCB_V3
 //#define USE_FREQEST    
 #define DEEP_SLEEP_MODE
 
@@ -38,7 +39,6 @@ extern "C" {
 uint8_t temprature_sens_read(); 
 }
 
-#define GDO0_PIN   GPIO_NUM_19            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
 #define LEN_PIN    GPIO_NUM_5             // Цифровой канал, к которму подключен контакт LEN (усилитель слабого сигнала) платы CC2500 (Предыдущее значение 17).
 #define BAT_PIN    GPIO_NUM_34            // Аналоговый канал для измерения напряжения питания
 #ifdef EXT_BLINK_LED
@@ -54,12 +54,18 @@ uint8_t temprature_sens_read();
   #define RX_PIN  GPIO_NUM_25
   #define TX_PIN  GPIO_NUM_26
 #ifdef PCB_V1
-  #define DTR_PIN GPIO_NUM_13
+  #define DTR_PIN    GPIO_NUM_13
+  #define GDO0_PIN   GPIO_NUM_19            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
 #endif
 #ifdef PCB_V2
-  #define DTR_PIN GPIO_NUM_14
+  #define DTR_PIN    GPIO_NUM_14
+  #define GDO0_PIN   GPIO_NUM_19            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
 #endif
-  #define RST_PIN GPIO_NUM_27
+#ifdef PCB_V3
+  #define DTR_PIN    GPIO_NUM_14
+  #define GDO0_PIN   GPIO_NUM_15            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
+#endif
+  #define RST_PIN    GPIO_NUM_27
 #endif
 
 #define NUM_CHANNELS        (4)       // Кол-во проверяемых каналов
@@ -1227,7 +1233,7 @@ boolean gsm_command(const char *command, const char *response, int timeout, bool
   while (millis() < timeout_time)
   {
     if (mySerial.available()) {
-      delayMicroseconds(100);
+      delay(1);
       SerialBuffer[loop] = mySerial.read();
       loop++;
       if (loop == SERIAL_BUFFER_LEN) loop = 0; // Контролируем переполнение буфера
@@ -1240,16 +1246,17 @@ boolean gsm_command(const char *command, const char *response, int timeout, bool
       if (break_on_error && loop >= len_error && strncmp(ERROR_STR,&SerialBuffer[loop-len_error],len_error) == 0) break;
     } 
     else {
+      delay(1);
       if (ret) {
-        delayMicroseconds(100);
         break;
       }
     }
   }
   SerialBuffer[loop] = '\0';
   while (mySerial.available()) {
-    delayMicroseconds(100);
+    delay(10);
     mySerial.read();
+    if ((millis() < timeout_time)) break;
   }
 #ifdef DEBUG
   Serial.print("Cmd=");
