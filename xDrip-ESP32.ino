@@ -1,11 +1,12 @@
 
-#define DEBUG
+//#define DEBUG
 //#define INT_BLINK_LED
 #define EXT_BLINK_LED
-//#define GSM_MODEM
+#define GSM_MODEM
 //#define MODEM_SLEEP_DTR
 #define PCB_V1
 //#define PCB_V2
+//#define PCB_V3
 //#define USE_FREQEST    
 #define DEEP_SLEEP_MODE
 
@@ -38,7 +39,6 @@ extern "C" {
 uint8_t temprature_sens_read(); 
 }
 
-#define GDO0_PIN   GPIO_NUM_19            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
 #define LEN_PIN    GPIO_NUM_5             // Цифровой канал, к которму подключен контакт LEN (усилитель слабого сигнала) платы CC2500 (Предыдущее значение 17).
 #define BAT_PIN    GPIO_NUM_34            // Аналоговый канал для измерения напряжения питания
 #ifdef EXT_BLINK_LED
@@ -54,19 +54,25 @@ uint8_t temprature_sens_read();
   #define RX_PIN  GPIO_NUM_25
   #define TX_PIN  GPIO_NUM_26
 #ifdef PCB_V1
-  #define DTR_PIN GPIO_NUM_13
+  #define DTR_PIN    GPIO_NUM_13
+  #define GDO0_PIN   GPIO_NUM_19            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
 #endif
 #ifdef PCB_V2
-  #define DTR_PIN GPIO_NUM_14
+  #define DTR_PIN    GPIO_NUM_14
+  #define GDO0_PIN   GPIO_NUM_19            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
 #endif
-  #define RST_PIN GPIO_NUM_27
+#ifdef PCB_V3
+  #define DTR_PIN    GPIO_NUM_14
+  #define GDO0_PIN   GPIO_NUM_15            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
+#endif
+  #define RST_PIN    GPIO_NUM_27
 #endif
 
 #define NUM_CHANNELS        (4)       // Кол-во проверяемых каналов
 #define FIVE_MINUTE         300000    // 5 минут
 #define TWO_MINUTE          120000    // 2 минуты
 #define WAKEUP_BT_TIME      49000     // Время необходимое для просыпания прибора c BT
-#define WAKEUP_NON_BT_TIME  3000      // Время необходимое для просыпания прибора без BT
+#define WAKEUP_NON_BT_TIME  5000      // Время необходимое для просыпания прибора без BT
 #define SPI_TIME_OUT        1000
 
 #define RADIO_BUFFER_LEN 200 // Размер буфера для приема данных от радиомодуля
@@ -144,7 +150,7 @@ byte fOffset[NUM_CHANNELS] = { 0x00, 0x00, 0x00, 0x00 };
 byte fOffset[NUM_CHANNELS] = { 0xE4, 0xE3, 0xE2, 0xE2 };
 #endif
 byte nChannels[NUM_CHANNELS] = { 0, 100, 199, 209 };
-unsigned long waitTimes[NUM_CHANNELS] = { 0, 600, 600, 600 };
+unsigned long waitTimes[NUM_CHANNELS] = { 0, 550, 550, 550 };
 
 byte sequential_missed_packets = 0;
 byte wait_after_time = 100;
@@ -1007,19 +1013,19 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
         Serial.print("byte 2 = ");
         Serial.println(dexderip_data[1],HEX);
 #endif      
-        if (param->write.len = 0x2 && dexderip_data[0] == 0x1 && dexderip_data[1] == 0x0) {
+        if (param->write.len == 0x2 && dexderip_data[0] == 0x1 && dexderip_data[1] == 0x0) {
           ble_connected = true;
 #ifdef DEBUG
           Serial.println("BLE connected");
 #endif                
         }
-        if (param->write.len = 0x2 && dexderip_data[0] == 0x2 && dexderip_data[1] == 0xF0) {
+        if (param->write.len == 0x2 && dexderip_data[0] == 0x2 && dexderip_data[1] == 0xF0) {
           ack_recieved = true;
 #ifdef DEBUG
           Serial.println("Data Acknowledge Packet");
 #endif                
         }
-        if (param->write.len = 0x6 && dexderip_data[0] == 0x6 && dexderip_data[1] == 0x01) {
+        if (param->write.len == 0x6 && dexderip_data[0] == 0x6 && dexderip_data[1] == 0x01) {
           memcpy(&dex_tx_id,&dexderip_data[2],4);
           settings.dex_tx_id = dex_tx_id;
           new_dex_id_recieved = true;
@@ -1050,7 +1056,8 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
     case ESP_GATTS_DISCONNECT_EVT: {
         ble_gatts_if = ESP_GATT_IF_NONE;
         ble_conn_id = 0;
-        esp_ble_gap_start_advertising(&ble_adv_params);
+        ble_connected = false;
+//        esp_ble_gap_start_advertising(&ble_adv_params);
 #ifdef DEBUG
         Serial.println("BLE DISCONECT");
 #endif      
@@ -1151,7 +1158,7 @@ void PrepareBlueTooth() {
     
     esp_err_t ret;
     /* initialize BLE and bluedroid */
-//    btStart();
+    btStart();
     ret = esp_bluedroid_init();
     if (ret) {
 #ifdef DEBUG
@@ -1167,7 +1174,10 @@ void PrepareBlueTooth() {
       return;
     }
 // Установим мощность передатчика BT
-    ret = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT,ESP_PWR_LVL_N11);
+    ret = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT,ESP_PWR_LVL_N14);
+    ret = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV,ESP_PWR_LVL_N14);
+//    ret = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT,ESP_PWR_LVL_N11);
+//    ret = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT,ESP_PWR_LVL_N8);
 #ifdef DEBUG
     if (ret) {
       Serial.println("esp_ble_tx_power_set failed");
@@ -1223,7 +1233,7 @@ boolean gsm_command(const char *command, const char *response, int timeout, bool
   while (millis() < timeout_time)
   {
     if (mySerial.available()) {
-      delayMicroseconds(100);
+      delay(1);
       SerialBuffer[loop] = mySerial.read();
       loop++;
       if (loop == SERIAL_BUFFER_LEN) loop = 0; // Контролируем переполнение буфера
@@ -1236,16 +1246,17 @@ boolean gsm_command(const char *command, const char *response, int timeout, bool
       if (break_on_error && loop >= len_error && strncmp(ERROR_STR,&SerialBuffer[loop-len_error],len_error) == 0) break;
     } 
     else {
+      delay(1);
       if (ret) {
-        delayMicroseconds(100);
         break;
       }
     }
   }
   SerialBuffer[loop] = '\0';
   while (mySerial.available()) {
-    delayMicroseconds(100);
+    delay(10);
     mySerial.read();
+    if ((millis() < timeout_time)) break;
   }
 #ifdef DEBUG
   Serial.print("Cmd=");
@@ -2216,16 +2227,43 @@ void stop_bluetooth() {
   try {
     stat = esp_bluedroid_get_status();
     if (stat == ESP_BLUEDROID_STATUS_ENABLED) {
+#ifdef DEBUG
+      Serial.println("bluedroid_disable start");      
+#endif
       esp_bluedroid_disable();
-      delay(1000);
+      delay(500);
+      while (ble_connected) {
+        delay(100);       
+      }
+#ifdef DEBUG
+      Serial.println("bluedroid_disable end");      
+#endif
       stat = esp_bluedroid_get_status();
     }  
     if (stat == ESP_BLUEDROID_STATUS_INITIALIZED) {
+#ifdef DEBUG
+      Serial.println("bluedroid_deinit start");      
+#endif
       esp_bluedroid_deinit();
       delay(1000);
+      while (ble_connected) {
+        delay(100);       
+      }
+#ifdef DEBUG
+      Serial.println("bluedroid_deinit end");      
+#endif
     }  
-//    btStop();  
-//    delay(1000);
+#ifdef DEBUG
+    Serial.println("btStop start");      
+#endif
+    btStop();  
+    delay(1000);
+    while (ble_connected) {
+      delay(100);       
+    }
+#ifdef DEBUG
+    Serial.println("btStop end");      
+#endif
   } catch (...) {
 #ifdef DEBUG
     Serial.println("Error on stoping BT");      
