@@ -29,6 +29,62 @@ https://www.aliexpress.com/item/Free-Shipping-Hot-Sale-Smart-Electronics-Integra
 <br>
 https://github.com/espressif/arduino-esp32/blob/master/docs/arduino-ide/windows.md<br>
 <br>
+<b>Настройка библиотеки ESP32</b><br>
+<br>
+1. Файл ..\hardware\espressif\esp32\boards.txt<br>
+В описании платы ESP32 Dev Module меняем частоту процессора на 80МГц<br>
+esp32.name=ESP32 Dev Module<br>
+....<br>
+esp32.build.f_cpu=240000000L<br>
+изменяем на:<br>
+esp32.name=ESP32 Dev Module<br>
+....<br>
+esp32.build.f_cpu=80000000L<br>
+<br>
+2. Файл ..\hardware\espressif\esp32\platform.txt<br>
+Добавляем возможность обрабатывать исключительные ситуации:<br>
+# These can be overridden in platform.local.txt<br>
+compiler.c.extra_flags=-<br>
+compiler.c.elf.extra_flags=<br>
+compiler.S.extra_flags=<br>
+compiler.cpp.extra_flags=<br>
+изменяем на:<br>
+# These can be overridden in platform.local.txt<br>
+compiler.c.extra_flags=-fexceptions<br>
+compiler.c.elf.extra_flags=<br>
+compiler.S.extra_flags=<br>
+compiler.cpp.extra_flags=-fexceptions<br>
+<br>
+3. Файл ..\hardware\espressif\esp32\tools\sdk\sdkconfig<br>
+Настриваем параметры для работы контроллера на частоте 80МГц:<br>
+CONFIG_ESP32_DEFAULT_CPU_FREQ_80=<br>
+CONFIG_ESP32_DEFAULT_CPU_FREQ_160=<br>
+CONFIG_ESP32_DEFAULT_CPU_FREQ_240=y<br>
+CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ=240<br>
+...<br>
+CONFIG_FREERTOS_HZ=1000<br>
+изменяем на:<br>
+CONFIG_ESP32_DEFAULT_CPU_FREQ_80=y<br>
+CONFIG_ESP32_DEFAULT_CPU_FREQ_160=<br>
+CONFIG_ESP32_DEFAULT_CPU_FREQ_240=<br>
+CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ=80<br>
+...<br>
+CONFIG_FREERTOS_HZ=333<br>
+<br>
+4. Файл ..\hardware\espressif\esp32\tools\sdk\include\config\sdkconfig.h<br>
+Настриваем параметры для работы контроллера на частоте 80МГц:<br>
+#define CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ 240<br>
+...<br>
+#define CONFIG_ESP32_DEFAULT_CPU_FREQ_240 1<br>
+...<br>
+#define CONFIG_FREERTOS_HZ 1000<br>
+изменяем на:<br>
+#define CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ 80<br>
+...<br>
+#define CONFIG_ESP32_DEFAULT_CPU_FREQ_80 1<br>
+...<br>
+#define CONFIG_FREERTOS_HZ 333<br>
+<br>
 <b>Загрузка прошивки в контроллер</b><br>
 <br>
 Для загрузки прошивки в контроллер необходимо подключить к плате адаптер USB-TTL используя контакты для программирования<br>
@@ -65,3 +121,14 @@ https://github.com/espressif/arduino-esp32/blob/master/docs/arduino-ide/windows.
   <li>SETTINGS - узнать текущие настройки. Текущие настройки будут присланы несколькими СМС-сообщениями</li>
   <li>REBOOT - перегрузить прибор</li>
 </ul>
+<br>
+<b>Привязка прибора к программе xDrip+ по протоколу BlueTooth:</b><br>
+<br>
+Алгоритм работы прибора разработан таким образом, что BlueTooth включается только после того как прибор поймает сигнал от трансмиттера.<br>
+Для привязки прибора к программе xDrip+ по протоколу BlueTooth необходимо выполнить следующие действия:<br>
+1. Включить прибор.<br>
+2. При необходимости настроить параметры прибора<br>
+3. Дождаться сигнала с трансмиттера. Во время ожидания сигнала с трансмиттера прибор коротко мигает желтым светодиодом.<br>
+4. После пойманного сигнала, прибор отправит данные в интернет (если такой режим работы настроен) и будет ждать 45 секунд соединения с программой xDrip+
+по протоколу BlueTooth. При этом будет непрерывно гореть желтый светодиод.<br>
+5. В течении 45 секунд в программе xDrip+  необходимо произвести BlueTooth Scan и выбрать прибор из списка найденных.<br>
