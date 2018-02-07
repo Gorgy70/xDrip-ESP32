@@ -50,20 +50,26 @@ uint8_t temprature_sens_read();
 #define MISO_PIN  GPIO_NUM_21
 #define MOSI_PIN  GPIO_NUM_23
 #define SS_PIN    GPIO_NUM_18 // Предыдущее значение 5
+#ifdef PCB_V1
+  #define GDO0_PIN   GPIO_NUM_19            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
+#endif
+#ifdef PCB_V2
+  #define GDO0_PIN   GPIO_NUM_19            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
+#endif
+#ifdef PCB_V3
+  #define GDO0_PIN   GPIO_NUM_15            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
+#endif
 #ifdef GSM_MODEM
   #define RX_PIN  GPIO_NUM_25
   #define TX_PIN  GPIO_NUM_26
 #ifdef PCB_V1
   #define DTR_PIN    GPIO_NUM_13
-  #define GDO0_PIN   GPIO_NUM_19            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
 #endif
 #ifdef PCB_V2
   #define DTR_PIN    GPIO_NUM_14
-  #define GDO0_PIN   GPIO_NUM_19            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
 #endif
 #ifdef PCB_V3
   #define DTR_PIN    GPIO_NUM_14
-  #define GDO0_PIN   GPIO_NUM_15            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
 #endif
   #define RST_PIN    GPIO_NUM_27
 #endif
@@ -1704,7 +1710,13 @@ void setup() {
   if (rtc_get_reset_reason(0) == RTCWDT_RTC_RESET) {
     wake_up = ESP_DEEP_SLEEP_WAKEUP_TIMER;
 #ifdef DEBUG
-    Serial.println("Reset by WDT");      
+    Serial.println("Reset by RTCWDT_RTC_RESET");      
+#endif    
+  }
+  if (rtc_get_reset_reason(0) == TG0WDT_SYS_RESET) {
+    wake_up = ESP_DEEP_SLEEP_WAKEUP_TIMER;
+#ifdef DEBUG
+    Serial.println("Reset by TG0WDT_SYS_RESET");      
 #endif    
   }
   if (wake_up == ESP_DEEP_SLEEP_WAKEUP_TIMER) {
