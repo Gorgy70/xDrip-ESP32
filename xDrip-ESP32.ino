@@ -1706,6 +1706,16 @@ void setup() {
   SPIclient.setClockDivider(SPI_CLOCK_DIV2);  // max SPI speed, 1/2 F_CLOCK
   digitalWrite(SS_PIN, HIGH);
   
+  init_CC2500();  // initialise CC2500 registers
+#ifdef DEBUG
+  Serial.print("CC2500 PARTNUM=");
+  b1 = ReadStatus(PARTNUM);
+  Serial.println(b1,HEX);
+  Serial.print("CC2500 VERSION=");
+  b1 = ReadStatus(VERSION);
+  Serial.println(b1,HEX);
+#endif
+  
   wake_up = esp_deep_sleep_get_wakeup_cause();
   if (rtc_get_reset_reason(0) == RTCWDT_RTC_RESET) {
     wake_up = ESP_DEEP_SLEEP_WAKEUP_TIMER;
@@ -1750,15 +1760,6 @@ void setup() {
   else {
 #ifdef DEBUG
     Serial.println("It's not wake up. It was turn ON!");      
-#endif
-    init_CC2500();  // initialise CC2500 registers
-#ifdef DEBUG
-    Serial.print("CC2500 PARTNUM=");
-    b1 = ReadStatus(PARTNUM);
-    Serial.println(b1,HEX);
-    Serial.print("CC2500 VERSION=");
-    b1 = ReadStatus(VERSION);
-    Serial.println(b1,HEX);
 #endif
 #ifdef USE_FREQEST    
     saveOffsetToFlash(); // Сохраняем смещения частоты по умолчанию в постоянной памяти
