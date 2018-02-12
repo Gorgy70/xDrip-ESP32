@@ -13,6 +13,14 @@ xDrip-ESP32 Settings\
 </tr>\
 <tr>\
   <td width=30%%>\
+    Version\
+  </td>\
+  <td align=left>\
+    %s\
+  </td>\
+</tr>\
+<tr>\
+  <td width=30%%>\
     Transmitter ID:\
   </td>\
   <td align=left>\
