@@ -39,6 +39,8 @@ extern "C" {
 uint8_t temprature_sens_read(); 
 }
 
+#define VERSION_NUM "1.2.1"
+
 #define LEN_PIN    GPIO_NUM_5             // Цифровой канал, к которму подключен контакт LEN (усилитель слабого сигнала) платы CC2500 (Предыдущее значение 17).
 #define BAT_PIN    GPIO_NUM_34            // Аналоговый канал для измерения напряжения питания
 #ifdef EXT_BLINK_LED
@@ -157,6 +159,7 @@ byte fOffset[NUM_CHANNELS] = { 0xE4, 0xE3, 0xE2, 0xE2 };
 #endif
 byte nChannels[NUM_CHANNELS] = { 0, 100, 199, 209 };
 unsigned long waitTimes[NUM_CHANNELS] = { 0, 550, 550, 550 };
+char version_str[15];
 
 byte sequential_missed_packets = 0;
 byte wait_after_time = 100;
@@ -801,7 +804,7 @@ void handleRoot() {
   } 
   if (settings.use_gsm == 0) chk4[0] = '\0';
   else sprintf(chk4,"%s","checked");
-  sprintf(temp,edit_form,current_id,settings.password_code,settings.http_url,settings.wifi_ssid,settings.wifi_pwd,chk1,chk2,chk3,chk4,settings.gsm_apn);
+  sprintf(temp,edit_form,version_str,current_id,settings.password_code,settings.http_url,settings.wifi_ssid,settings.wifi_pwd,chk1,chk2,chk3,chk4,settings.gsm_apn);
 //  server.send(200, "text/html", temp);
   client.println("HTTP/1.1 200 OK");
   client.println("Content-Type: text/html");  
@@ -1406,10 +1409,44 @@ void read_sms() {
       extract_phone_number(phone_number,radio_buff,i);
       send_sms(phone_number,"PWD:",settings.password_code);
     }
+    if (strncmp("BT_FORMAT ",&radio_buff[i],10) == 0) {
+      if (radio_buff[11] == 'n' || radio_buff[11] == 'N') radio_buff[11] = '0';
+      if (radio_buff[11] == 'd' || radio_buff[11] == 'D') radio_buff[11] = '1';
+      if (radio_buff[11] == 'b' || radio_buff[11] == 'B') radio_buff[11] = '2';
+      if (isDigit(radio_buff[11])) {
+        settings.bt_format = int(radio_buff[11]);
+        if (settings.bt_format > 2) {
+          settings.bt_format = 0;
+        }
+        saveSettingsToFlash();
+        extract_phone_number(phone_number,radio_buff,i);
+        sprintf(ascii_trans_id,"%d",settings.bt_format);
+        send_sms(phone_number,"BT_FORMAT:",ascii_trans_id);
+      }
+    }
+    if (strncmp("USE_GSM ",&radio_buff[i],8) == 0) {
+      if (radio_buff[9] == 'y' || radio_buff[9] == 'Y') radio_buff[9] = '1';
+      if (radio_buff[9] == 'n' || radio_buff[9] == 'N') radio_buff[9] = '0';
+      if (isDigit(radio_buff[11])) {
+        settings.use_gsm = int(radio_buff[9]);
+        if (settings.use_gsm > 1) {
+          settings.use_gsm = 0;
+        }
+        saveSettingsToFlash();
+        extract_phone_number(phone_number,radio_buff,i);
+        sprintf(ascii_trans_id,"%d",settings.use_gsm);
+        send_sms(phone_number,"USE_GSM:",ascii_trans_id);
+      }
+    }
     if (strncmp("REBOOT",&radio_buff[i],6) == 0) {
       reboot = true;
       extract_phone_number(phone_number,radio_buff,i);
       send_sms(phone_number,"REBOOT:","OK");
+    }
+    if (strncmp("VERSION",&radio_buff[i],7) == 0) {
+      reboot = true;
+      extract_phone_number(phone_number,radio_buff,i);
+      send_sms(phone_number,"VERSION:",version_str);
     }
     if (strncmp("SETTINGS",&radio_buff[i],8) == 0) {
       extract_phone_number(phone_number,radio_buff,i);
@@ -1417,7 +1454,12 @@ void read_sms() {
       send_sms(phone_number,"TRANSMIT:",ascii_trans_id);
       send_sms(phone_number,"APN:",settings.gsm_apn);
       send_sms(phone_number,"HTTP:",settings.http_url);
-      send_sms(phone_number,"PWD:",settings.password_code);     
+      send_sms(phone_number,"PWD:",settings.password_code);
+      sprintf(ascii_trans_id,"%d",settings.bt_format);
+      send_sms(phone_number,"BT_FORMAT:",ascii_trans_id);     
+      sprintf(ascii_trans_id,"%d",settings.use_gsm);
+      send_sms(phone_number,"USE_GSM:",ascii_trans_id);     
+      send_sms(phone_number,"VERSION:",version_str);
     }
   }
   delay(GSM_DELAY);
@@ -1511,19 +1553,19 @@ void init_GSM(boolean sleep_after_init) {
   gsm_command("AT+CSCLK=1", "OK", 2); // Переводим модем в режим сна в режиме управления сигналом DTR
   delay(200);
 #endif  
-  if (settings.use_gsm) {
-    gsm_availible = gsm_command("AT+CFUN=1", "Call Ready", 30); // Подключаемся к сети  
-    if (gsm_availible) {
-      delay(GSM_DELAY);
+  gsm_availible = gsm_command("AT+CFUN=1", "Call Ready", 30); // Подключаемся к сети  
+  if (gsm_availible) {
+    delay(GSM_DELAY);
 //    gsm_command("AT+CMGF?","OK",10); // Устанавливаем текстовый режим чтения смс
-      gsm_command("AT+CPMS?","OK",2);
+    gsm_command("AT+CPMS?","OK",2);
 // Устанавливаем текстовый режим чтения смс
-      if (gsm_command("AT+CMGF=1","OK",10)) { 
-        read_sms();
-      }  
-      else {
-        gsm_command("AT+CMGL=0","OK",10);
-      }
+    if (gsm_command("AT+CMGF=1","OK",10)) { 
+      read_sms();
+    }  
+    else {
+      gsm_command("AT+CMGL=0","OK",10);
+    }
+    if (settings.use_gsm) {
       internet_availible = set_gprs_profile();
       if (!internet_availible) {
 #ifdef INT_BLINK_LED
@@ -1535,15 +1577,15 @@ void init_GSM(boolean sleep_after_init) {
       
       }
     }  
-    else {
+  }  
+  else {
 #ifdef INT_BLINK_LED
-      blink_sequence("0110");
+    blink_sequence("0110");
 #endif
 #ifdef EXT_BLINK_LED
-      blink_sequence_red("0110");
+    blink_sequence_red("0110");
 #endif
-    }
-  }  
+  }
   if (sleep_after_init) {
     gsm_goto_sleep();
   }  
@@ -1675,6 +1717,9 @@ void setup() {
   digitalWrite(RST_PIN, HIGH);
 //  mySerial.begin(9600);
   mySerial.begin(9600,SERIAL_8N1,RX_PIN,TX_PIN);
+  sprintf(version_str,"%s-GSM",VERSION_NUM);
+#else  
+  sprintf(version_str,"%s-WiFi",VERSION_NUM;
 #endif
   
   // initialize digital pin LED_BUILTIN as an output.
@@ -1706,6 +1751,16 @@ void setup() {
   SPIclient.setClockDivider(SPI_CLOCK_DIV2);  // max SPI speed, 1/2 F_CLOCK
   digitalWrite(SS_PIN, HIGH);
   
+  init_CC2500();  // initialise CC2500 registers
+#ifdef DEBUG
+  Serial.print("CC2500 PARTNUM=");
+  b1 = ReadStatus(PARTNUM);
+  Serial.println(b1,HEX);
+  Serial.print("CC2500 VERSION=");
+  b1 = ReadStatus(VERSION);
+  Serial.println(b1,HEX);
+#endif
+  
   wake_up = esp_deep_sleep_get_wakeup_cause();
   if (rtc_get_reset_reason(0) == RTCWDT_RTC_RESET) {
     wake_up = ESP_DEEP_SLEEP_WAKEUP_TIMER;
@@ -1726,7 +1781,8 @@ void setup() {
 #ifdef GSM_MODEM
     digitalWrite(DTR_PIN, HIGH); // Модем должен спать
 // Считаем что с модемом все хорошо    
-    gsm_availible = settings.use_gsm; 
+//    gsm_availible = settings.use_gsm; 
+    gsm_availible = true; 
     internet_availible = settings.use_gsm;       
     modem_availible = true; 
     modem_sleeping = true;
@@ -1750,15 +1806,6 @@ void setup() {
   else {
 #ifdef DEBUG
     Serial.println("It's not wake up. It was turn ON!");      
-#endif
-    init_CC2500();  // initialise CC2500 registers
-#ifdef DEBUG
-    Serial.print("CC2500 PARTNUM=");
-    b1 = ReadStatus(PARTNUM);
-    Serial.println(b1,HEX);
-    Serial.print("CC2500 VERSION=");
-    b1 = ReadStatus(VERSION);
-    Serial.println(b1,HEX);
 #endif
 #ifdef USE_FREQEST    
     saveOffsetToFlash(); // Сохраняем смещения частоты по умолчанию в постоянной памяти

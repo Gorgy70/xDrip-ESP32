@@ -1,14 +1,22 @@
 
 const char* edit_form = "<html>\
 <title>\
-Parakeet-8266 Settings\
+xDrip-ESP32 Settings\
 </title>\
 <body> \
 <form action='save' method='POST'>\
 <table  border='0' cellpadding='2' cellspacing='2' style='border-collapse: collapse' width='100%%'>\
 <tr>\
   <td align=center>\
-    Parakeet-8266 Settings\
+    xDrip-ESP32 Settings\
+  </td>\
+</tr>\
+<tr>\
+  <td width=30%%>\
+    Version\
+  </td>\
+  <td align=left>\
+    %s\
   </td>\
 </tr>\
 <tr>\
