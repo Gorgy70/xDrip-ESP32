@@ -1368,6 +1368,8 @@ void read_sms() {
   boolean ret;
   byte i;
   boolean reboot = false;
+  boolean new_apn = false;
+  boolean reinit_gsm = false;
   char phone_number[15];
   char ascii_trans_id[6];
 
@@ -1379,9 +1381,10 @@ void read_sms() {
     if (strncmp("APN ",&radio_buff[i],4) == 0) {
       set_settings(settings.gsm_apn,radio_buff,i+4,32);
       saveSettingsToFlash();
-      set_gprs_profile();      
+//      set_gprs_profile();      
       extract_phone_number(phone_number,radio_buff,i);
       send_sms(phone_number,"APN:",settings.gsm_apn);
+      new_apn = true;
     }
     if (strncmp("DEFAULTS",&radio_buff[i],8) == 0) {
       clearSettings();
@@ -1436,6 +1439,7 @@ void read_sms() {
         extract_phone_number(phone_number,radio_buff,i);
         sprintf(ascii_trans_id,"%d",settings.use_gsm);
         send_sms(phone_number,"USE_GSM:",ascii_trans_id);
+        reinit_gsm = true;
       }
     }
     if (strncmp("REBOOT",&radio_buff[i],6) == 0) {
@@ -1466,6 +1470,8 @@ void read_sms() {
   gsm_command("AT+CMGDA=\"DEL READ\"","OK",5); // Удалить прочитанные смс-ки
   delay(GSM_DELAY);
   gsm_command("AT+CMGDA=\"DEL SENT\"","OK",5); // Удалить отправленные смс-ки
+  if (new_apn) set_gprs_profile();
+  if (reinit_gsm) init_GSM(true);
   if (reboot) ESP.restart();
 }
 
@@ -1553,19 +1559,19 @@ void init_GSM(boolean sleep_after_init) {
   gsm_command("AT+CSCLK=1", "OK", 2); // Переводим модем в режим сна в режиме управления сигналом DTR
   delay(200);
 #endif  
-  gsm_availible = gsm_command("AT+CFUN=1", "Call Ready", 30); // Подключаемся к сети  
-  if (gsm_availible) {
-    delay(GSM_DELAY);
+  if (settings.use_gsm) {
+    gsm_availible = gsm_command("AT+CFUN=1", "Call Ready", 30); // Подключаемся к сети  
+    if (gsm_availible) {
+      delay(GSM_DELAY);
 //    gsm_command("AT+CMGF?","OK",10); // Устанавливаем текстовый режим чтения смс
-    gsm_command("AT+CPMS?","OK",2);
+      gsm_command("AT+CPMS?","OK",2);
 // Устанавливаем текстовый режим чтения смс
-    if (gsm_command("AT+CMGF=1","OK",10)) { 
-      read_sms();
-    }  
-    else {
-      gsm_command("AT+CMGL=0","OK",10);
-    }
-    if (settings.use_gsm) {
+      if (gsm_command("AT+CMGF=1","OK",10)) { 
+        read_sms();
+      }  
+      else {
+        gsm_command("AT+CMGL=0","OK",10);
+      }
       internet_availible = set_gprs_profile();
       if (!internet_availible) {
 #ifdef INT_BLINK_LED
@@ -1577,15 +1583,15 @@ void init_GSM(boolean sleep_after_init) {
       
       }
     }  
-  }  
-  else {
+    else {
 #ifdef INT_BLINK_LED
-    blink_sequence("0110");
+      blink_sequence("0110");
 #endif
 #ifdef EXT_BLINK_LED
-    blink_sequence_red("0110");
+      blink_sequence_red("0110");
 #endif
-  }
+    }
+  }  
   if (sleep_after_init) {
     gsm_goto_sleep();
   }  
@@ -1781,8 +1787,7 @@ void setup() {
 #ifdef GSM_MODEM
     digitalWrite(DTR_PIN, HIGH); // Модем должен спать
 // Считаем что с модемом все хорошо    
-//    gsm_availible = settings.use_gsm; 
-    gsm_availible = true; 
+    gsm_availible = settings.use_gsm; 
     internet_availible = settings.use_gsm;       
     modem_availible = true; 
     modem_sleeping = true;
