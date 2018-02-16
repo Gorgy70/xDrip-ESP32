@@ -39,7 +39,7 @@ extern "C" {
 uint8_t temprature_sens_read(); 
 }
 
-#define VERSION_NUM "1.2.1"
+#define VERSION_NUM "1.2.2"
 
 #define LEN_PIN    GPIO_NUM_5             // Цифровой канал, к которму подключен контакт LEN (усилитель слабого сигнала) платы CC2500 (Предыдущее значение 17).
 #define BAT_PIN    GPIO_NUM_34            // Аналоговый канал для измерения напряжения питания
@@ -1413,11 +1413,11 @@ void read_sms() {
       send_sms(phone_number,"PWD:",settings.password_code);
     }
     if (strncmp("BT_FORMAT ",&radio_buff[i],10) == 0) {
-      if (radio_buff[11] == 'n' || radio_buff[11] == 'N') radio_buff[11] = '0';
-      if (radio_buff[11] == 'd' || radio_buff[11] == 'D') radio_buff[11] = '1';
-      if (radio_buff[11] == 'b' || radio_buff[11] == 'B') radio_buff[11] = '2';
-      if (isDigit(radio_buff[11])) {
-        settings.bt_format = int(radio_buff[11]);
+      if (radio_buff[i+10] == 'n' || radio_buff[i+10] == 'N') radio_buff[i+10] = '0';
+      if (radio_buff[i+10] == 'd' || radio_buff[i+10] == 'D') radio_buff[i+10] = '1';
+      if (radio_buff[i+10] == 'b' || radio_buff[i+10] == 'B') radio_buff[i+10] = '2';
+      if (isDigit(radio_buff[i+10])) {
+        settings.bt_format = int(radio_buff[i+10]);
         if (settings.bt_format > 2) {
           settings.bt_format = 0;
         }
@@ -1428,10 +1428,10 @@ void read_sms() {
       }
     }
     if (strncmp("USE_GSM ",&radio_buff[i],8) == 0) {
-      if (radio_buff[9] == 'y' || radio_buff[9] == 'Y') radio_buff[9] = '1';
-      if (radio_buff[9] == 'n' || radio_buff[9] == 'N') radio_buff[9] = '0';
-      if (isDigit(radio_buff[11])) {
-        settings.use_gsm = int(radio_buff[9]);
+      if (radio_buff[i+8] == 'y' || radio_buff[i+8] == 'Y') radio_buff[i+8] = '1';
+      if (radio_buff[i+8] == 'n' || radio_buff[i+8] == 'N') radio_buff[i+8] = '0';
+      if (isDigit(radio_buff[i+8])) {
+        settings.use_gsm = int(radio_buff[i+8]);
         if (settings.use_gsm > 1) {
           settings.use_gsm = 0;
         }
