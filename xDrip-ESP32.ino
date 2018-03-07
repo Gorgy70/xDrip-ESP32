@@ -1,8 +1,8 @@
 
-//#define DEBUG
+#define DEBUG
 //#define INT_BLINK_LED
 #define EXT_BLINK_LED
-#define GSM_MODEM
+//#define GSM_MODEM
 //#define MODEM_SLEEP_DTR
 #define PCB_V1
 //#define PCB_V2
@@ -39,7 +39,7 @@ extern "C" {
 uint8_t temprature_sens_read(); 
 }
 
-#define VERSION_NUM "1.2.2"
+#define VERSION_NUM "1.2.3"
 
 #define LEN_PIN    GPIO_NUM_5             // Цифровой канал, к которму подключен контакт LEN (усилитель слабого сигнала) платы CC2500 (Предыдущее значение 17).
 #define BAT_PIN    GPIO_NUM_34            // Аналоговый канал для измерения напряжения питания
@@ -1102,6 +1102,12 @@ void sendBeacon()
   unsigned char cmd_response[8];
   unsigned long t1;
 
+  if (settings.bt_format != 2) {
+    return;
+  }
+#ifdef EXT_BLINK_LED    
+  digitalWrite(YELLOW_LED_PIN, HIGH);
+#endif
   PrepareBlueTooth();
   t1 = millis();
   ble_connected = false;
@@ -1112,9 +1118,16 @@ void sendBeacon()
       Serial.println("Not connected");
 #endif
       stop_bluetooth();
+#ifdef EXT_BLINK_LED    
+      digitalWrite(YELLOW_LED_PIN, LOW);
+#endif
       return;
     }  
   }
+#ifdef EXT_BLINK_LED    
+  digitalWrite(YELLOW_LED_PIN, LOW);
+  digitalWrite(RED_LED_PIN, HIGH);
+#endif
   
   //return if we don't have a connection or if we have already sent a beacon
   cmd_response[0] = 0x07;
@@ -1139,6 +1152,9 @@ void sendBeacon()
     if (millis() - t1 > WAKEUP_BT_TIME) break;
   }
   stop_bluetooth();
+#ifdef EXT_BLINK_LED    
+  digitalWrite(RED_LED_PIN, LOW);
+#endif
 }
 
 void PrepareBlueTooth() {
@@ -1184,12 +1200,17 @@ void PrepareBlueTooth() {
     }
 // Установим мощность передатчика BT
     ret = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT,ESP_PWR_LVL_N14);
+#ifdef DEBUG
+    if (ret) {
+      Serial.println("esp_ble_tx_power_set failed ESP_BLE_PWR_TYPE_DEFAULT");
+    }
+#endif      
     ret = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV,ESP_PWR_LVL_N14);
 //    ret = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT,ESP_PWR_LVL_N11);
 //    ret = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT,ESP_PWR_LVL_N8);
 #ifdef DEBUG
     if (ret) {
-      Serial.println("esp_ble_tx_power_set failed");
+      Serial.println("esp_ble_tx_power_set failed ESP_BLE_PWR_TYPE_ADV");
     }
 #endif      
     /* set BLE name and broadcast advertising info
@@ -1246,13 +1267,15 @@ boolean gsm_command(const char *command, const char *response, int timeout, bool
       SerialBuffer[loop] = mySerial.read();
       loop++;
       if (loop == SERIAL_BUFFER_LEN) loop = 0; // Контролируем переполнение буфера
-      if (loop > len) {
+      if (loop >= len && loop+len <= SERIAL_BUFFER_LEN) {
         if (strncmp(response,&SerialBuffer[loop-len],len) == 0) {
           ret = true;
           delay(100);
         }
       }  
-      if (break_on_error && loop >= len_error && strncmp(ERROR_STR,&SerialBuffer[loop-len_error],len_error) == 0) break;
+      if (break_on_error && loop >= len_error && loop+len_error <= SERIAL_BUFFER_LEN) {
+        if (strncmp(ERROR_STR,&SerialBuffer[loop-len_error],len_error) == 0) break;
+      }  
     } 
     else {
       delay(1);
@@ -1725,7 +1748,7 @@ void setup() {
   mySerial.begin(9600,SERIAL_8N1,RX_PIN,TX_PIN);
   sprintf(version_str,"%s-GSM",VERSION_NUM);
 #else  
-  sprintf(version_str,"%s-WiFi",VERSION_NUM;
+  sprintf(version_str,"%s-WiFi",VERSION_NUM);
 #endif
   
   // initialize digital pin LED_BUILTIN as an output.
@@ -2148,6 +2171,12 @@ void print_bt_packet() {
 #endif
 #ifdef EXT_BLINK_LED    
   digitalWrite(RED_LED_PIN, HIGH);
+#endif
+#ifdef DEBUG
+  Serial.print("ESP_BLE_PWR_TYPE_DEFAULT = ");    
+  Serial.println(esp_ble_tx_power_get(ESP_BLE_PWR_TYPE_DEFAULT));
+  Serial.print("ESP_BLE_PWR_TYPE_ADV = ");    
+  Serial.println(esp_ble_tx_power_get(ESP_BLE_PWR_TYPE_ADV));
 #endif
   if (settings.bt_format == 1) {
     sprintf(radio_buff,"%lu %d %d\r\n",dex_num_decoder(Pkt.raw),Pkt.battery,battery_milivolts);
