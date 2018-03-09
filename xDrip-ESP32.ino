@@ -2,7 +2,7 @@
 #define DEBUG
 //#define INT_BLINK_LED
 #define EXT_BLINK_LED
-//#define GSM_MODEM
+#define GSM_MODEM
 //#define MODEM_SLEEP_DTR
 #define PCB_V1
 //#define PCB_V2
@@ -39,7 +39,7 @@ extern "C" {
 uint8_t temprature_sens_read(); 
 }
 
-#define VERSION_NUM "1.2.3"
+#define VERSION_NUM "1.2.4"
 
 #define LEN_PIN    GPIO_NUM_5             // Цифровой канал, к которму подключен контакт LEN (усилитель слабого сигнала) платы CC2500 (Предыдущее значение 17).
 #define BAT_PIN    GPIO_NUM_34            // Аналоговый канал для измерения напряжения питания
@@ -93,7 +93,11 @@ uint8_t temprature_sens_read();
 // assuming that there is a 10k ohm resistor between BAT+ and BAT_PIN, and a 27k ohm resistor between BAT_PIN and GND
 #define  VREF                 3.3 // Опорное напряжение для аналогового входа
 #define  VMAX                 4.1  // Максимальное напряжение батареи
+#ifdef GSM_MODEM
+#define  VMIN                 3.2  // Минимальное напряжение батареи при использовании ГСМ модема
+#else
 #define  VMIN                 3.0  // Минимальное напряжение батареи
+#endif
 #define  R1                   10   // Резистор делителя напряжения между BAT+ и BAT_PIN (кОм)
 #define  R2                   27   // Резистор делителя напряжения между BAT_PIN и GND (кОм)
 #define  ANALOG_RESOLUTION    4095 // Масимальное значение на аналоговом входе. Ио умолчанию 12 бит 
@@ -1941,37 +1945,55 @@ byte ReadRadioBuffer() {
 void mesure_battery() {
   int val;
 
-  val = analogRead(BAT_PIN);
+  try {
+
+    val = analogRead(BAT_PIN);
 //  val = adc.read(0)  ;
-  battery_milivolts = 1000*VREF*val/ANALOG_RESOLUTION;
+    battery_milivolts = 1000*VREF*val/ANALOG_RESOLUTION;
 #ifdef DEBUG
-  Serial.print("Analog Read = ");
-  Serial.println(val);
-  Serial.print("Milivolts = ");
-  Serial.println(battery_milivolts);
+    Serial.print("Analog Read = ");
+    Serial.println(val);
+    Serial.print("Milivolts = ");
+    Serial.println(battery_milivolts);
 #endif
-  battery_milivolts = battery_milivolts*(10+27)/27;
+    battery_milivolts = battery_milivolts*(10+27)/27;
 //  if (val < BATTERY_MINIMUM) val = BATTERY_MINIMUM;
-  battery_percent = 100* (val - BATTERY_MINIMUM)/(BATTERY_MAXIMUM - BATTERY_MINIMUM);
-  if (battery_percent < 0) battery_percent = 0;
-  if (battery_percent > 100) battery_percent = 100;
+    battery_percent = 100* (val - BATTERY_MINIMUM)/(BATTERY_MAXIMUM - BATTERY_MINIMUM);
+    if (battery_percent < 0) battery_percent = 0;
+    if (battery_percent > 100) battery_percent = 100;
 #ifdef DEBUG
-  Serial.print("Battery Milivolts = ");
-  Serial.println(battery_milivolts);
-  Serial.print("Battery Percent = ");
-  Serial.println(battery_percent);
+    Serial.print("Battery Milivolts = ");
+    Serial.println(battery_milivolts);
+    Serial.print("Battery Percent = ");
+    Serial.println(battery_percent);
 #endif
-  if (battery_percent > 0 && battery_percent < 30) low_battery = true;
-  else low_battery = false;       
+    if (battery_percent > 0 && battery_percent < 30) low_battery = true;
+    else low_battery = false;       
+  } catch (...) {
+    battery_percent = 0;
+    low_battery = false;
+#ifdef DEBUG
+    Serial.println("Error on mesure battery");      
+#endif
+  }
 }
 
 byte mesure_temperature() {
-  byte tp = temprature_sens_read(); 
-  tp = ( tp - 32 )/1.8;
+  byte tp;
+  
+  try {
+    tp = temprature_sens_read(); 
+    tp = ( tp - 32 )/1.8;
 #ifdef DEBUG
-  Serial.print("Temprature = ");  
-  Serial.println(tp);  
+    Serial.print("Temprature = ");  
+    Serial.println(tp);  
 #endif
+  } catch (...) {
+    tp = 36.6;
+#ifdef DEBUG
+    Serial.println("Error on mesure temperature");      
+#endif
+  }
   return tp;
 }
 
@@ -2597,6 +2619,7 @@ void loop() {
   else packet_on_board = gdo0_status;
   
   if (packet_on_board) {
+    if (current_channel == 0) disable_WDT();
 #ifdef DEBUG
     Serial.print("Packet on board!");
 #endif
@@ -2609,7 +2632,6 @@ void loop() {
         break;
       }
     }
-    if (current_channel == 0) disable_WDT();
   } else return; // Нет сигнала от декскома - выходим из цикла
 
 #ifdef INT_BLINK_LED
