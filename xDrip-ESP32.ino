@@ -39,7 +39,7 @@ extern "C" {
 uint8_t temprature_sens_read(); 
 }
 
-#define VERSION_NUM "1.2.4"
+#define VERSION_NUM "1.3.1"
 
 #define LEN_PIN    GPIO_NUM_5             // Цифровой канал, к которму подключен контакт LEN (усилитель слабого сигнала) платы CC2500 (Предыдущее значение 17).
 #define BAT_PIN    GPIO_NUM_34            // Аналоговый канал для измерения напряжения питания
@@ -92,7 +92,7 @@ uint8_t temprature_sens_read();
 
 // assuming that there is a 10k ohm resistor between BAT+ and BAT_PIN, and a 27k ohm resistor between BAT_PIN and GND
 #define  VREF                 3.3 // Опорное напряжение для аналогового входа
-#define  VMAX                 4.1  // Максимальное напряжение батареи
+#define  VMAX                 4.2  // Максимальное напряжение батареи
 #ifdef GSM_MODEM
 #define  VMIN                 3.2  // Минимальное напряжение батареи при использовании ГСМ модема
 #else
@@ -293,6 +293,14 @@ typedef struct _parakeet_settings
 } parakeet_settings;
 
 parakeet_settings settings;
+
+typedef struct _bad_data_element
+{
+  boolean has_data;
+  char    data[21];
+} bad_data_element;
+
+bad_data_element bad_data[NUM_CHANNELS];
 
 char SrcNameTable[32] = { '0', '1', '2', '3', '4', '5', '6', '7',
                           '8', '9', 'A', 'B', 'C', 'D', 'E', 'F',
@@ -1873,6 +1881,7 @@ void swap_channel(unsigned long channel, byte newFSCTRL0) {
   while (ReadStatus(MARCSTATE) != 0x0d) {
     // Подождем пока включится режим приема
   }
+  bad_data[channel].has_data = false;
 }
 
 boolean radioCrcPassed()
@@ -1887,7 +1896,7 @@ boolean radioCrcPassed()
   return (lqi & 0x80) ? true : false;
 }
 
-byte ReadRadioBuffer() {
+byte ReadRadioBuffer(byte channel_index) {
   byte len;
   byte i;
   byte rxbytes;  
@@ -1896,10 +1905,18 @@ byte ReadRadioBuffer() {
   Serial.println("ReadRadioBuffer start");
 #endif
   memset (&radio_buff, 0, sizeof (Dexcom_packet));
-  if (radioCrcPassed()) {
-    len = ReadStatus(RXBYTES);
-  } 
-  else {
+  len = ReadStatus(RXBYTES);
+  if (!radioCrcPassed()) {
+    if (len == 21) {
+      bad_data[channel_index].has_data = true;
+      for (i = 0; i < len; i++) {
+        bad_data[channel_index].data[i] = ReadReg(RXFIFO);
+#ifdef DEBUG
+        Serial.print(bad_data[channel_index].data[i],HEX);
+        Serial.print("\t");
+#endif
+      } 
+    }
     len = 0;
 #ifdef DEBUG
     Serial.println("Bad CRC");
@@ -2537,9 +2554,10 @@ void loop() {
     }
     return;
   }
-
+  
 // Ловим сигнал от Декскома
 //  delay(1);
+  packet_on_board = false;
   
   current_time = millis();
 
@@ -2557,11 +2575,11 @@ void loop() {
   if (current_channel > 0 && current_time - cc2500_start_time > waitTimes[current_channel]) {
     current_channel++;
     if (current_channel > 3) {
-      current_channel = 0;
-#ifdef GSM_MODEM
-      check_sms();
+      current_channel--;
+      packet_on_board = true;
+#ifdef DEBUG
+      Serial.println("Chanels end. Signal not catched");
 #endif
-      enable_WDT(1);
     }
   }  
 
@@ -2616,7 +2634,7 @@ void loop() {
 // Зажигаем желтую ламочку
 #endif
   } 
-  else packet_on_board = gdo0_status;
+  else packet_on_board |= gdo0_status;
   
   if (packet_on_board) {
     if (current_channel == 0) disable_WDT();
@@ -2642,7 +2660,7 @@ void loop() {
   digitalWrite(RED_LED_PIN, LOW);
 #endif
 
-  packet_len = ReadRadioBuffer();
+  packet_len = ReadRadioBuffer(current_channel);
   if (packet_len == 0 || packet_len == 21) {
     freqest = ReadStatus(FREQEST);
 //    fOffset[current_channel] += freqest;
