@@ -39,7 +39,7 @@ extern "C" {
 uint8_t temprature_sens_read(); 
 }
 
-#define VERSION_NUM "1.3.1"
+#define VERSION_NUM "1.3.2"
 
 #define LEN_PIN    GPIO_NUM_5             // Цифровой канал, к которму подключен контакт LEN (усилитель слабого сигнала) платы CC2500 (Предыдущее значение 17).
 #define BAT_PIN    GPIO_NUM_34            // Аналоговый канал для измерения напряжения питания
@@ -1881,7 +1881,6 @@ void swap_channel(unsigned long channel, byte newFSCTRL0) {
   while (ReadStatus(MARCSTATE) != 0x0d) {
     // Подождем пока включится режим приема
   }
-  bad_data[channel].has_data = false;
 }
 
 boolean radioCrcPassed()
@@ -1904,8 +1903,13 @@ byte ReadRadioBuffer(byte channel_index) {
 #ifdef DEBUG
   Serial.println("ReadRadioBuffer start");
 #endif
-  memset (&radio_buff, 0, sizeof (Dexcom_packet));
+//  memset (&radio_buff, 0, sizeof (Dexcom_packet));
+  for (i = 0; i < sizeof (Dexcom_packet); i++) radio_buff[i] = 0;
   len = ReadStatus(RXBYTES);
+#ifdef DEBUG
+  Serial.print("Bytes in buffer 1: ");
+  Serial.println(len);
+#endif
   if (!radioCrcPassed()) {
     if (len == 21) {
       bad_data[channel_index].has_data = true;
@@ -1923,7 +1927,7 @@ byte ReadRadioBuffer(byte channel_index) {
 #endif
   }
 #ifdef DEBUG
-  Serial.print("Bytes in buffer: ");
+  Serial.print("Bytes in buffer 2: ");
   Serial.println(len);
 #endif
   if (len > 0 && len < 65) {
@@ -2518,6 +2522,7 @@ void loop() {
   byte packet_len;
   uint8_t freqest;
   int rssi;
+  byte gdo0_status2;
 
 // Первые две минуты работает WebServer на адресе 192.168.70.1 для конфигурации устройства
   if (web_server_start_time > 0) {
@@ -2575,7 +2580,7 @@ void loop() {
   if (current_channel > 0 && current_time - cc2500_start_time > waitTimes[current_channel]) {
     current_channel++;
     if (current_channel > 3) {
-      current_channel--;
+      current_channel = 3;
       packet_on_board = true;
 #ifdef DEBUG
       Serial.println("Chanels end. Signal not catched");
@@ -2586,6 +2591,7 @@ void loop() {
   if (current_channel != old_channel) {  
     cc2500_start_time = current_time;
     swap_channel(nChannels[current_channel], fOffset[current_channel]);
+    bad_data[current_channel].has_data = false;    
 #ifdef DEBUG
     Serial.print("Chanel = ");
     Serial.print(nChannels[current_channel]);
@@ -2634,12 +2640,16 @@ void loop() {
 // Зажигаем желтую ламочку
 #endif
   } 
-  else packet_on_board |= gdo0_status;
+  else {
+    gdo0_status2 = gdo0_status;
+    if (gdo0_status2 > 0) packet_on_board = true;
+//    packet_on_board |= gdo0_status;
+  }
   
   if (packet_on_board) {
     if (current_channel == 0) disable_WDT();
 #ifdef DEBUG
-    Serial.print("Packet on board!");
+    Serial.println("Packet on board!");
 #endif
     unsigned long t1 = millis();
     while (digitalRead(GDO0_PIN) == HIGH) {
@@ -2676,7 +2686,7 @@ void loop() {
   if (Pkt.src_addr == dex_tx_id) {
 #ifdef DEBUG
     Serial.print("gdo0_status = ");
-    Serial.println(gdo0_status);
+    Serial.println(gdo0_status2);
     Serial.print("Catched.Ch=");
     Serial.println(nChannels[current_channel]);
     Serial.print("Signal Power = ");
@@ -2700,9 +2710,12 @@ void loop() {
     }
     cc2500_start_time = current_time;
     swap_channel(nChannels[current_channel], fOffset[current_channel]);
+    bad_data[current_channel].has_data = false;    
 #ifdef DEBUG
+    Serial.print("channel index = ");
+    Serial.println(current_channel);
     Serial.print("gdo0_status = ");
-    Serial.println(gdo0_status);
+    Serial.println(gdo0_status2);
     Serial.print("Chanel = ");
     Serial.print(nChannels[current_channel]);
     Serial.print(" Time = ");
@@ -2751,8 +2764,14 @@ void loop() {
 }
 
 void gdo0_pin_up() {
-  portENTER_CRITICAL_ISR(&mux);
-  gdo0_status = 1;  
-  portEXIT_CRITICAL_ISR(&mux);
+  try {
+    portENTER_CRITICAL_ISR(&mux);
+    gdo0_status = 1;  
+    portEXIT_CRITICAL_ISR(&mux);
+  } catch (...) {
+#ifdef DEBUG
+    Serial.println("Error in ISRR");
+#endif
+  }  
 }
 
