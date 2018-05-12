@@ -1,4 +1,4 @@
-
+ 
 #define DEBUG
 //#define INT_BLINK_LED
 #define EXT_BLINK_LED
@@ -39,7 +39,7 @@ extern "C" {
 uint8_t temprature_sens_read(); 
 }
 
-#define VERSION_NUM "1.3.2"
+#define VERSION_NUM "1.3.3"
 
 #define LEN_PIN    GPIO_NUM_5             // Цифровой канал, к которму подключен контакт LEN (усилитель слабого сигнала) платы CC2500 (Предыдущее значение 17).
 #define BAT_PIN    GPIO_NUM_34            // Аналоговый канал для измерения напряжения питания
@@ -1407,6 +1407,7 @@ void read_sms() {
   boolean reinit_gsm = false;
   char phone_number[15];
   char ascii_trans_id[6];
+  char ch1;
 
   delay(GSM_DELAY);
   gsm_command("AT+CMGL=\"REC UNREAD\"" ,"OK",5); // Читаем все новые смс-ки в буфер
@@ -1448,34 +1449,43 @@ void read_sms() {
       send_sms(phone_number,"PWD:",settings.password_code);
     }
     if (strncmp("BT_FORMAT ",&radio_buff[i],10) == 0) {
-      if (radio_buff[i+10] == 'n' || radio_buff[i+10] == 'N') radio_buff[i+10] = '0';
-      if (radio_buff[i+10] == 'd' || radio_buff[i+10] == 'D') radio_buff[i+10] = '1';
-      if (radio_buff[i+10] == 'b' || radio_buff[i+10] == 'B') radio_buff[i+10] = '2';
-      if (isDigit(radio_buff[i+10])) {
-        settings.bt_format = int(radio_buff[i+10]);
-        if (settings.bt_format > 2) {
+      ch1 = radio_buff[i+10];
+#ifdef DEBUG
+      Serial.print("Bt format char = ");      
+      Serial.println(ch1);
+#endif
+      if (ch1 == 'n' || ch1 == 'N') ch1 = '0';
+      if (ch1 == 'd' || ch1 == 'D') ch1 = '1';
+      if (ch1 == 'b' || ch1 == 'B') ch1 = '2';
+      switch (ch1) {
+        case '0': 
           settings.bt_format = 0;
-        }
-        saveSettingsToFlash();
-        extract_phone_number(phone_number,radio_buff,i);
-        sprintf(ascii_trans_id,"%d",settings.bt_format);
-        send_sms(phone_number,"BT_FORMAT:",ascii_trans_id);
+          break;
+        case '1':  
+          settings.bt_format = 1;
+          break;
+        case '2':  
+          settings.bt_format = 2;
+          break;
+        default:
+          settings.bt_format = 0;
       }
+      saveSettingsToFlash();
+      extract_phone_number(phone_number,radio_buff,i);
+      sprintf(ascii_trans_id,"%d",settings.bt_format);
+      send_sms(phone_number,"BT_FORMAT:",ascii_trans_id);
     }
     if (strncmp("USE_GSM ",&radio_buff[i],8) == 0) {
-      if (radio_buff[i+8] == 'y' || radio_buff[i+8] == 'Y') radio_buff[i+8] = '1';
-      if (radio_buff[i+8] == 'n' || radio_buff[i+8] == 'N') radio_buff[i+8] = '0';
-      if (isDigit(radio_buff[i+8])) {
-        settings.use_gsm = int(radio_buff[i+8]);
-        if (settings.use_gsm > 1) {
-          settings.use_gsm = 0;
-        }
-        saveSettingsToFlash();
-        extract_phone_number(phone_number,radio_buff,i);
-        sprintf(ascii_trans_id,"%d",settings.use_gsm);
-        send_sms(phone_number,"USE_GSM:",ascii_trans_id);
-        reinit_gsm = true;
-      }
+      ch1 = radio_buff[i+8];
+      if (ch1 == 'y' || ch1 == 'Y') ch1 = '1';
+      if (ch1 == 'n' || ch1 == 'N') ch1 = '0';
+      if (ch1 == '1') settings.use_gsm = 1;
+      else settings.use_gsm = 0;
+      saveSettingsToFlash();
+      extract_phone_number(phone_number,radio_buff,i);
+      sprintf(ascii_trans_id,"%d",settings.use_gsm);
+      send_sms(phone_number,"USE_GSM:",ascii_trans_id);
+      reinit_gsm = true;
     }
     if (strncmp("REBOOT",&radio_buff[i],6) == 0) {
       reboot = true;
