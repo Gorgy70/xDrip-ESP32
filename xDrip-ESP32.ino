@@ -4,11 +4,12 @@
 #define EXT_BLINK_LED
 #define GSM_MODEM
 //#define MODEM_SLEEP_DTR
-#define PCB_V1
+//#define PCB_V1
 //#define PCB_V2
-//#define PCB_V3
+#define PCB_V3
 //#define USE_FREQEST    
 #define DEEP_SLEEP_MODE
+#define BT_PAIRING 
 
 #include "driver/gpio.h"
 #include "soc/rtc_cntl_reg.h"
@@ -39,7 +40,7 @@ extern "C" {
 uint8_t temprature_sens_read(); 
 }
 
-#define VERSION_NUM "1.3.3"
+#define VERSION_NUM "1.4.1"
 
 #define LEN_PIN    GPIO_NUM_5             // Цифровой канал, к которму подключен контакт LEN (усилитель слабого сигнала) платы CC2500 (Предыдущее значение 17).
 #define BAT_PIN    GPIO_NUM_34            // Аналоговый канал для измерения напряжения питания
@@ -79,7 +80,7 @@ uint8_t temprature_sens_read();
 #define NUM_CHANNELS        (4)       // Кол-во проверяемых каналов
 #define FIVE_MINUTE         300000    // 5 минут
 #define TWO_MINUTE          120000    // 2 минуты
-#define WAKEUP_BT_TIME      49000     // Время необходимое для просыпания прибора c BT
+#define WAKEUP_BT_TIME      54000     // Время необходимое для просыпания прибора c BT
 #define WAKEUP_NON_BT_TIME  5000      // Время необходимое для просыпания прибора без BT
 #define SPI_TIME_OUT        1000
 
@@ -942,7 +943,23 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
     case ESP_GAP_BLE_SCAN_RSP_DATA_RAW_SET_COMPLETE_EVT:
         esp_ble_gap_start_advertising(&ble_adv_params);
         break;
+    case ESP_GAP_BLE_SEC_REQ_EVT:
+     /* send the positive (true) security response to the peer device to accept the security request.
+     If not accept the security request, should sent the security response with negative(false) accept value*/
+        esp_ble_gap_security_rsp(param->ble_security.ble_req.bd_addr, true);
+        break;    
+    case ESP_GAP_BLE_PASSKEY_REQ_EVT:                           /* passkey request event */
+//        ESP_LOGI(GATTS_TABLE_TAG, "ESP_GAP_BLE_PASSKEY_REQ_EVT");
+//        esp_ble_passkey_reply(heart_rate_profile_tab[HEART_PROFILE_APP_IDX].remote_bda, true, 0x00);
+        break;
 #ifdef DEBUG
+    case ESP_GAP_BLE_KEY_EVT:
+        Serial.print("Key type = ");
+        Serial.println(param->ble_security.ble_key.key_type);
+        break;
+    case ESP_GAP_BLE_AUTH_CMPL_EVT:
+        Serial.println("Bounded OK!");
+        break;
     case ESP_GAP_BLE_ADV_START_COMPLETE_EVT:
         //advertising start complete event to indicate advertising start successfully or failed
         if (param->adv_start_cmpl.status != ESP_BT_STATUS_SUCCESS) {
@@ -961,6 +978,10 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
     default:
         break;
     }
+#ifdef DEBUG
+  Serial.print("GAP BLE callback event = ");
+  Serial.println(event);
+#endif      
 }
 
 static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param)
@@ -973,6 +994,8 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
 #ifdef DEBUG
         printf("REGISTER_APP_EVT, status %d, app_id %d\n", param->reg.status, param->reg.app_id);
 #endif      
+            //generate a resolvable random address
+//        esp_ble_gap_config_local_privacy(true);
         esp_ble_gatts_create_service(gatts_if, &ble_service, GATTS_NUM_HANDLE_TEST_ON);
         break;
     }   
@@ -987,8 +1010,10 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
                                      ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE | ESP_GATT_CHAR_PROP_BIT_NOTIFY | ESP_GATT_CHAR_PROP_BIT_INDICATE,
                                      &gatts_attr_val, NULL);
 
+#ifdef DEBUG
         Serial.print("Ret = ");
         Serial.println(ret);
+#endif      
         esp_ble_gatts_start_service(param->create.service_handle);
         break;
     }    
@@ -1106,6 +1131,10 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
     default:
         break;
     }
+#ifdef DEBUG
+  Serial.print("GATTS BLE callback event = ");
+  Serial.println(event);
+#endif      
 }
 
 void sendBeacon()
@@ -1241,6 +1270,21 @@ void PrepareBlueTooth() {
     esp_ble_gap_register_callback(gap_event_handler);
     /* register profiles */
     esp_ble_gatts_app_register(0);
+    
+#ifdef BT_PAIRING
+    esp_ble_auth_req_t auth_req = ESP_LE_AUTH_BOND;     //bonding with peer device after authentication
+    esp_ble_io_cap_t iocap = ESP_IO_CAP_NONE;           //set the IO capability to No output No input
+    uint8_t key_size = 16;      //the key size should be 7~16 bytes
+    uint8_t init_key = ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK;
+    uint8_t rsp_key = ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK;
+    esp_ble_gap_set_security_param(ESP_BLE_SM_AUTHEN_REQ_MODE, &auth_req, sizeof(uint8_t));
+    esp_ble_gap_set_security_param(ESP_BLE_SM_IOCAP_MODE, &iocap, sizeof(uint8_t));
+    esp_ble_gap_set_security_param(ESP_BLE_SM_MAX_KEY_SIZE, &key_size, sizeof(uint8_t));
+    
+    esp_ble_gap_set_security_param(ESP_BLE_SM_SET_INIT_KEY, &init_key, sizeof(uint8_t));   
+    esp_ble_gap_set_security_param(ESP_BLE_SM_SET_RSP_KEY, &rsp_key, sizeof(uint8_t));
+#endif      
+    
 }
 
 #ifdef GSM_MODEM
@@ -2378,8 +2422,10 @@ void stop_bluetooth() {
 #endif
       esp_bluedroid_disable();
       delay(500);
+      unsigned long t1 = millis();
       while (ble_connected) {
         delay(100);       
+        if (millis() - t1 > WAKEUP_BT_TIME) break;
       }
 #ifdef DEBUG
       Serial.println("bluedroid_disable end");      
