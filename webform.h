@@ -1,9 +1,8 @@
-
 const char* edit_form = "<html>\
 <title>\
 xDrip-ESP32 Settings\
 </title>\
-<body> \
+<body>\
 <form action='save' method='POST'>\
 <table  border='0' cellpadding='2' cellspacing='2' style='border-collapse: collapse' width='100%%'>\
 <tr>\
@@ -61,8 +60,7 @@ xDrip-ESP32 Settings\
 </tr>\
 <tr>\
   <td width=30%%>\
-    BlueTooth Format:\
-  </td>\
+    BlueTooth Format:\ </td>\
   <td>\
     <input type='radio' name='BtFormat' value='0' %s>None\
     <input type='radio' name='BtFormat' value='1' %s>xDrip\
@@ -86,9 +84,17 @@ xDrip-ESP32 Settings\
   </td>\
 </tr>\
 <tr>\
-  <td align=center>\
-    <input type='submit' value='Save' />\
+  <td width=30%%>\
+    Clear bounded devices:\
   </td>\
+  <td>\
+    <input type='checkbox' name='ClearBT' value='YES'>\
+  </td>\
+</tr>\
+<tr>\
+  <td align=center>\
+   <input type='submit' value='Save' />\
+ </td>\
 </tr>\
 </table>\
 </form>\

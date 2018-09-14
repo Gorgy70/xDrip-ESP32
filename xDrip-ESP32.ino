@@ -804,7 +804,7 @@ String paramByName(const String& param_string, const String& param_name) {
 
 void handleRoot() {
   char current_id[6];
-  char temp[2000];
+  char temp[2100];
   char chk1[8];
   char chk2[8];
   char chk3[8];
