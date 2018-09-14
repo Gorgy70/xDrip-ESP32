@@ -40,7 +40,7 @@ extern "C" {
 uint8_t temprature_sens_read(); 
 }
 
-#define VERSION_NUM "1.4.1"
+#define VERSION_NUM "1.4.2"
 
 #define LEN_PIN    GPIO_NUM_5             // Цифровой канал, к которму подключен контакт LEN (усилитель слабого сигнала) платы CC2500 (Предыдущее значение 17).
 #define BAT_PIN    GPIO_NUM_34            // Аналоговый канал для измерения напряжения питания
@@ -735,6 +735,27 @@ char ReadStatus(char addr) {
   return y;
 }
 
+void clearBTDevices() {
+  int dev_num;
+
+  btStart();
+  esp_bluedroid_init();
+  esp_bluedroid_enable();
+  dev_num = esp_ble_get_bond_device_num();  
+#ifdef DEBUG
+  Serial.print("Bonded devices: "); 
+  Serial.println(dev_num); 
+#endif
+  esp_ble_bond_dev_t *dev_list = (esp_ble_bond_dev_t *)malloc(sizeof(esp_ble_bond_dev_t) * dev_num);
+  esp_ble_get_bond_device_list(&dev_num, dev_list);
+  for (int i = 0; i < dev_num; i++) {
+    esp_ble_remove_bond_device(dev_list[i].bd_addr);
+  }
+
+  free(dev_list);  
+  stop_bluetooth();
+}
+
 String urlDecode(const String& text)
 {
   String decoded = "";
@@ -783,7 +804,7 @@ String paramByName(const String& param_string, const String& param_name) {
 
 void handleRoot() {
   char current_id[6];
-  char temp[1800];
+  char temp[2000];
   char chk1[8];
   char chk2[8];
   char chk3[8];
@@ -880,6 +901,13 @@ void handleSave(const String& param_string) {
   else settings.use_gsm = 0;
   arg1 = paramByName(param_string,"APN");
   arg1.toCharArray(settings.gsm_apn,31);
+
+  arg1 = paramByName(param_string,"ClearBT");
+#ifdef DEBUG
+  Serial.print("ClearBT = ");
+  Serial.println(arg1);
+#endif      
+  if (arg1 == "YES") clearBTDevices();
     
   saveSettingsToFlash();
   
@@ -1469,6 +1497,7 @@ void read_sms() {
     if (strncmp("DEFAULTS",&radio_buff[i],8) == 0) {
       clearSettings();
       saveSettingsToFlash();
+      clearBTDevices();
       extract_phone_number(phone_number,radio_buff,i);
       send_sms(phone_number,"DEFAULTS:","OK");
     }
@@ -2437,9 +2466,11 @@ void stop_bluetooth() {
       Serial.println("bluedroid_deinit start");      
 #endif
       esp_bluedroid_deinit();
+      unsigned long t1 = millis();
       delay(1000);
       while (ble_connected) {
         delay(100);       
+        if (millis() - t1 > WAKEUP_BT_TIME) break;
       }
 #ifdef DEBUG
       Serial.println("bluedroid_deinit end");      
@@ -2450,8 +2481,10 @@ void stop_bluetooth() {
 #endif
     btStop();  
     delay(1000);
+    unsigned long t1 = millis();
     while (ble_connected) {
       delay(100);       
+      if (millis() - t1 > WAKEUP_BT_TIME) break;
     }
 #ifdef DEBUG
     Serial.println("btStop end");      
