@@ -40,7 +40,7 @@ extern "C" {
 uint8_t temprature_sens_read(); 
 }
 
-#define VERSION_NUM "1.4.2"
+#define VERSION_NUM "1.5.1"
 
 #define LEN_PIN    GPIO_NUM_5             // Цифровой канал, к которму подключен контакт LEN (усилитель слабого сигнала) платы CC2500 (Предыдущее значение 17).
 #define BAT_PIN    GPIO_NUM_34            // Аналоговый канал для измерения напряжения питания
@@ -2604,6 +2604,109 @@ void enable_WDT(int time_s) {
   REG_WRITE(RTC_CNTL_WDTWPROTECT_REG,0);
 }
 
+void check_bad_data() {
+  int i1,i2;
+  unsigned long src_addr;
+  unsigned int raw[4];
+  unsigned int filtered[4];
+  byte battery[4];
+  unsigned int max_raw;
+  unsigned int max_filtered;
+  byte max_battery;
+  unsigned int min_raw;
+  unsigned int min_filtered;
+  byte min_battery;
+  unsigned int some_raw;
+  unsigned int some_filtered;
+  byte some_battery;
+
+  for (i1 = 0; i1 < 4; i1++) {
+    raw[i1] = 0;
+    filtered[i1] = 0;
+    battery[i1] = 0;
+  }
+  i2 = 0;
+  for (i1 = 0; i1 < 4; i1++) {
+    if (bad_data[i1].has_data) {
+      memcpy(&src_addr, &bad_data[i1].data[5], 4);
+      if (src_addr == dex_tx_id) {
+#ifdef DEBUG
+        Serial.print("ID OK in bad packet #");
+        Serial.println(i1);
+#endif
+        memcpy(&raw[i2], &bad_data[i1].data[12], 2);
+        memcpy(&filtered[i2], &bad_data[i1].data, 2);
+        battery[i2] = bad_data[i1].data[16];
+        i2++;        
+      }  
+    }
+  }
+  if (i2 == 0) return;
+  max_raw = raw[0];
+  max_filtered = filtered[0];
+  max_battery = battery[0];
+  min_raw = raw[0];
+  min_filtered = filtered[0];
+  min_battery = battery[0];
+  some_raw = 0;
+  some_filtered = 0;
+  some_battery = 0;
+  for (i1 = 1; i1 < i2; i1++) {
+// raw value    
+    if (raw[i1] > max_raw) max_raw = raw[i1];
+    if (raw[i1] < min_raw) min_raw = raw[i1];
+    if (raw[i1] != 0 && raw[i1] == raw[i1-1]) some_raw = raw[i1];
+    if (i1 > 1 && raw[i1] != 0 && raw[i1] == raw[i1-2]) some_raw = raw[i1];
+    if (i1 > 2 && raw[i1] != 0 &&  raw[i1] == raw[i1-3]) some_raw = raw[i1];
+// filtered value    
+    if (filtered[i1] > max_filtered) max_filtered = filtered[i1];
+    if (filtered[i1] < min_filtered) min_filtered = filtered[i1];
+    if (filtered[i1] != 0 && filtered[i1] == filtered[i1-1]) some_filtered = filtered[i1];
+    if (i1 > 1 && filtered[i1] != 0 && filtered[i1] == filtered[i1-2]) some_filtered = filtered[i1];
+    if (i1 > 2 && filtered[i1] != 0 &&  filtered[i1] == filtered[i1-3]) some_filtered = filtered[i1];
+// battery value    
+    if (battery[i1] > max_battery) max_battery = battery[i1];
+    if (battery[i1] < min_battery) min_battery = battery[i1];
+    if (battery[i1] != 0 && battery[i1] == battery[i1-1]) some_battery = battery[i1];
+    if (i1 > 1 && battery[i1] != 0 && battery[i1] == battery[i1-2]) some_battery = battery[i1];
+    if (i1 > 2 && battery[i1] != 0 &&  battery[i1] == battery[i1-3]) some_battery = battery[i1];
+  }
+  if (max_raw == min_raw) {
+    Pkt.raw = raw[0];
+  }
+  else {
+    if (some_raw != 0) Pkt.raw = some_raw;
+    else Pkt.raw = raw[0];    
+  }  
+  if (max_filtered == min_filtered) {
+    Pkt.filtered = filtered[0];
+  }
+  else {
+    if (some_filtered != 0) Pkt.filtered = some_filtered;
+    else Pkt.filtered = filtered[0];    
+  }  
+  if (max_battery == min_battery) {
+    Pkt.filtered = battery[0];
+  }
+  else {
+    if (some_battery != 0) Pkt.battery = some_battery;
+    else Pkt.battery = battery[0];    
+  }  
+  Pkt.src_addr = dex_tx_id;
+  current_channel = 3; // Последний канал
+  catch_time = millis() - 500 * current_channel; // Приводим к каналу 0
+  next_time = catch_time + FIVE_MINUTE;
+  packet_catched = true;
+#ifdef DEBUG
+  Serial.print("raw from bad packet = ");
+  Serial.println(Pkt.raw);
+  Serial.print("filtered from bad packet = ");
+  Serial.println(Pkt.filtered);
+  Serial.print("battery from bad packet = ");
+  Serial.println(Pkt.battery);
+#endif
+}
+
 void loop() {
   unsigned long current_time;
   boolean packet_on_board;
@@ -2814,7 +2917,9 @@ void loop() {
   portENTER_CRITICAL(&mux);
   gdo0_status = 0;
   portEXIT_CRITICAL(&mux);
-  
+
+  if (!packet_catched && current_channel == 0)
+    check_bad_data();
   if (packet_catched)
   {
     mesure_battery();
