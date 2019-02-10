@@ -31,59 +31,8 @@ https://github.com/espressif/arduino-esp32/blob/master/docs/arduino-ide/windows.
 <br>
 <b>Настройка библиотеки ESP32</b><br>
 <br>
-1. Файл ..\hardware\espressif\esp32\boards.txt<br>
-В описании платы ESP32 Dev Module меняем частоту процессора на 80МГц<br>
-esp32.name=ESP32 Dev Module<br>
-....<br>
-esp32.build.f_cpu=240000000L<br>
-изменяем на:<br>
-esp32.name=ESP32 Dev Module<br>
-....<br>
-esp32.build.f_cpu=80000000L<br>
-<br>
-2. Файл ..\hardware\espressif\esp32\platform.txt<br>
-Добавляем возможность обрабатывать исключительные ситуации:<br>
-# These can be overridden in platform.local.txt<br>
-compiler.c.extra_flags=-<br>
-compiler.c.elf.extra_flags=<br>
-compiler.S.extra_flags=<br>
-compiler.cpp.extra_flags=<br>
-изменяем на:<br>
-# These can be overridden in platform.local.txt<br>
-compiler.c.extra_flags=-fexceptions<br>
-compiler.c.elf.extra_flags=<br>
-compiler.S.extra_flags=<br>
-compiler.cpp.extra_flags=-fexceptions<br>
-<br>
-3. Файл ..\hardware\espressif\esp32\tools\sdk\sdkconfig<br>
-Настриваем параметры для работы контроллера на частоте 80МГц:<br>
-CONFIG_ESP32_DEFAULT_CPU_FREQ_80=<br>
-CONFIG_ESP32_DEFAULT_CPU_FREQ_160=<br>
-CONFIG_ESP32_DEFAULT_CPU_FREQ_240=y<br>
-CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ=240<br>
-...<br>
-CONFIG_FREERTOS_HZ=1000<br>
-изменяем на:<br>
-CONFIG_ESP32_DEFAULT_CPU_FREQ_80=y<br>
-CONFIG_ESP32_DEFAULT_CPU_FREQ_160=<br>
-CONFIG_ESP32_DEFAULT_CPU_FREQ_240=<br>
-CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ=80<br>
-...<br>
-CONFIG_FREERTOS_HZ=333<br>
-<br>
-4. Файл ..\hardware\espressif\esp32\tools\sdk\include\config\sdkconfig.h<br>
-Настриваем параметры для работы контроллера на частоте 80МГц:<br>
-#define CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ 240<br>
-...<br>
-#define CONFIG_ESP32_DEFAULT_CPU_FREQ_240 1<br>
-...<br>
-#define CONFIG_FREERTOS_HZ 1000<br>
-изменяем на:<br>
-#define CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ 80<br>
-...<br>
-#define CONFIG_ESP32_DEFAULT_CPU_FREQ_80 1<br>
-...<br>
-#define CONFIG_FREERTOS_HZ 333<br>
+При использовании свежих версий SDK тактовая частота контроллера устанавливается в Arduino IDE.
+Также необходимо установить параметр "Partition Scheme" в значение "No OTA (Large APP)". В противном случае компиляция скэтча завершится с ошибкой.
 <br>
 <b>Загрузка прошивки в контроллер</b><br>
 <br>
