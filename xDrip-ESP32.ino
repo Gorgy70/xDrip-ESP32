@@ -21,7 +21,13 @@
 #include "WiFi.h"
 #include "HTTPClient.h"
 #include "bt.h"
-#include "bta_api.h"
+#include "nvs_flash.h"
+#include <WebServer.h>
+//#include <BLEDevice.h>
+//#include <BLEServer.h>
+//#include <BLEUtils.h>
+//#include <BLE2902.h>
+//#include "bta_api.h"
 
 #include "esp_system.h"
 #include "esp_wifi.h"
@@ -40,7 +46,7 @@ extern "C" {
 uint8_t temprature_sens_read(); 
 }
 
-#define VERSION_NUM "1.5.1"
+#define VERSION_NUM "1.6.1"
 
 #define LEN_PIN    GPIO_NUM_5             // Цифровой канал, к которму подключен контакт LEN (усилитель слабого сигнала) платы CC2500 (Предыдущее значение 17).
 #define BAT_PIN    GPIO_NUM_34            // Аналоговый канал для измерения напряжения питания
@@ -116,7 +122,10 @@ int      BATTERY_MINIMUM  =   VMIN*ANALOG_RESOLUTION*R2/(R1+R2)/VREF ; //678 3.0
 
 #define GATTS_SERVICE_UUID_XDRIP     0xFFE0  // UID сервиса BLE
 #define GATTS_CHAR_UUID_XDRIP        0xFFE1  // UID значения BLE
-#define GATTS_NUM_HANDLE_TEST_ON     4       
+#define GATTS_NUM_HANDLE_TEST_ON     4     
+#define SERVICE_UUID_XDRIP = "0000ffe0-0000-1000-8000-00805f9b34fb";
+#define CHAR_UUID_XDRIP = "0000ffe1-0000-1000-8000-00805f9b34fb";
+  
 /* maximum value of a characteristic */
 #define GATTS_CHAR_VAL_LEN_MAX 0xFF
 
@@ -133,8 +142,10 @@ IPAddress gateway(192,168,70,1);
 IPAddress subnet(255,255,255,0);
 uint8_t   wifi_mac[6];
 
-WiFiServer server(80);
-WiFiClient client;
+//WiFiServer server(80);
+//WiFiClient client;
+WebServer server2(80);
+
 
 SPIClass SPIclient(VSPI);
 
@@ -755,7 +766,7 @@ void clearBTDevices() {
   free(dev_list);  
   stop_bluetooth();
 }
-
+/*
 String urlDecode(const String& text)
 {
   String decoded = "";
@@ -848,7 +859,47 @@ void handleRoot() {
   client.println(temp);
   client.println();
 }
+*/
+void handleRoot2() {
+  char current_id[6];
+  char temp[2100];
+  char chk1[8];
+  char chk2[8];
+  char chk3[8];
+  char chk4[8];
 
+#ifdef DEBUG
+  Serial.println("http server root"); 
+#endif
+  dexcom_src_to_ascii(settings.dex_tx_id,current_id);
+  switch (settings.bt_format) {
+    case 0:
+      sprintf(chk1,"%s","checked");
+      chk2[0] = '\0';
+      chk3[0] = '\0';
+      break;
+    case 1:
+      chk1[0] = '\0';
+      sprintf(chk2,"%s","checked");
+      chk3[0] = '\0';
+      break;
+    case 2:
+      chk1[0] = '\0';
+      chk2[0] = '\0';
+      sprintf(chk3,"%s","checked");
+      break;
+    default:  
+      chk1[0] = '\0';
+      chk2[0] = '\0';
+      chk3[0] = '\0';
+      break;
+  } 
+  if (settings.use_gsm == 0) chk4[0] = '\0';
+  else sprintf(chk4,"%s","checked");
+  sprintf(temp,edit_form,version_str,current_id,settings.password_code,settings.http_url,settings.wifi_ssid,settings.wifi_pwd,chk1,chk2,chk3,chk4,settings.gsm_apn);
+  server2.send(200, "text/html", temp);
+}
+/*
 void handleNotFound() {
 #ifdef DEBUG
   Serial.println("http server not found"); 
@@ -861,7 +912,11 @@ void handleNotFound() {
   client.println();
 //  server.send ( 404, "text/plain", "not found!" );
 }
-
+*/
+void handleNotFound2() {
+  server2.send ( 404, "text/plain", "not found!" );
+}
+/*
 void handleSave(const String& param_string) {
   char new_id[6]; 
   String arg1;
@@ -926,6 +981,63 @@ void handleSave(const String& param_string) {
   Serial.println("Configuration saved!");
 #endif      
 }
+*/
+void handleSave2() {
+  char new_id[6]; 
+  String arg1;
+  char temp[1400];
+  char bt_frmt[8];
+
+  arg1 = server2.arg("DexcomID");
+  arg1.toCharArray(new_id,6);
+  settings.dex_tx_id = asciiToDexcomSrc (new_id);
+  dex_tx_id = settings.dex_tx_id;
+  arg1 = server2.arg("PasswordCode");
+  arg1.toCharArray(settings.password_code,6);
+  arg1 = server2.arg("WebService");
+  arg1.toCharArray(settings.http_url,56);
+  arg1 = server2.arg("WiFiSSID");
+  arg1.toCharArray(settings.wifi_ssid,16);
+  arg1 = server2.arg("WiFiPwd");
+  arg1.toCharArray(settings.wifi_pwd,16);
+  arg1 = server2.arg("BtFormat");
+  if (arg1 == "0") {
+    settings.bt_format = 0;
+    sprintf(bt_frmt,"%s","None");
+  }
+  else if (arg1 == "1") {   
+    settings.bt_format = 1;
+    sprintf(bt_frmt,"%s","xDrip");
+  } else if (arg1 == "2") {    
+    settings.bt_format = 2;
+    sprintf(bt_frmt,"%s","xBridge");
+  }
+  arg1 = server2.arg("UseGSM");
+#ifdef DEBUG
+  Serial.print("UseGSM = ");
+  Serial.println(arg1);
+#endif      
+  if (arg1 == "YES") settings.use_gsm = 1;
+  else settings.use_gsm = 0;
+  arg1 = server2.arg("APN");
+  arg1.toCharArray(settings.gsm_apn,31);
+
+  arg1 = server2.arg("ClearBT");
+#ifdef DEBUG
+  Serial.print("ClearBT = ");
+  Serial.println(arg1);
+#endif      
+  if (arg1 == "YES") clearBTDevices();
+    
+  saveSettingsToFlash();
+  
+  sprintf(temp, "Configuration saved!<br>DexcomID = %s<br>Password Code = %s<br>URL = %s<br>WiFi SSID = %s<br>WiFi Password = %s<br> BlueTooth format: %s<br> Use GSM %d<br> APN = %s",
+                new_id,settings.password_code,settings.http_url,settings.wifi_ssid,settings.wifi_pwd,bt_frmt,settings.use_gsm,settings.gsm_apn);
+  server2.send ( 200, "text/html",temp );
+#ifdef DEBUG
+  Serial.println("Configuration saved!");
+#endif      
+}
 
 void PrepareWebServer() {
 /*  
@@ -952,7 +1064,11 @@ void PrepareWebServer() {
     Serial.println("Set IPAddress Done!");    
   }
 #endif      
-  server.begin(); 
+//  server.begin(); 
+  server2.on("/", handleRoot2);
+  server2.on("/save", handleSave2);
+  server2.onNotFound ( handleNotFound2 );
+  server2.begin(); 
 #ifdef DEBUG
   Serial.println("Server start OK!");    
 #endif      
@@ -980,6 +1096,8 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
 //        ESP_LOGI(GATTS_TABLE_TAG, "ESP_GAP_BLE_PASSKEY_REQ_EVT");
 //        esp_ble_passkey_reply(heart_rate_profile_tab[HEART_PROFILE_APP_IDX].remote_bda, true, 0x00);
         break;
+    case ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT:      
+      break;    
 #ifdef DEBUG
     case ESP_GAP_BLE_KEY_EVT:
         Serial.print("Key type = ");
@@ -1137,11 +1255,24 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
 #endif      
         break;
     }    
-#ifdef DEBUG
     case ESP_GATTS_READ_EVT: {
         printf("ESP_GATTS_READ_EVT, conn_id %d, trans_id %d, handle %d\n", param->read.conn_id, param->read.trans_id, param->read.handle);
+        esp_gatt_rsp_t rsp;
+        memset(&rsp, 0, sizeof(esp_gatt_rsp_t));
+        rsp.attr_value.handle = param->read.handle;
+        rsp.attr_value.len = 4;
+        rsp.attr_value.value[0] = 0xde;
+        rsp.attr_value.value[1] = 0xed;
+        rsp.attr_value.value[2] = 0xbe;
+        rsp.attr_value.value[3] = 0xef;        
+        esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id, ESP_GATT_OK, &rsp);
+#ifdef DEBUG
+        Serial.print("ESP_GATTS_READ_EVT, need_rsp = ");
+        Serial.println(param->read.need_rsp);
+#endif      
         break;
     }
+#ifdef DEBUG
     case ESP_GATTS_EXEC_WRITE_EVT:    {
         printf("ESP_GATTS_EXEC_WRITE_EVT, conn_id %d, trans_id %d, handle %d\n", param->read.conn_id, param->read.trans_id, param->read.handle);
         break;
@@ -1253,6 +1384,36 @@ void PrepareBlueTooth() {
     esp_err_t ret;
     /* initialize BLE and bluedroid */
     btStart();
+/*    
+    ret = nvs_flash_init();
+    if (ret != ESP_OK) {
+#ifdef DEBUG
+      Serial.println("nvs_flash_init failed");
+#endif      
+    }
+    ret = esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
+    if (ret != ESP_OK) {
+#ifdef DEBUG
+      Serial.println("esp_bt_controller_mem_release failed");
+#endif      
+//      return;
+    }
+    esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
+    ret = esp_bt_controller_init(&bt_cfg);    
+    if (ret != ESP_OK) {
+#ifdef DEBUG
+      Serial.println("esp_bt_controller_init failed");
+#endif      
+//      return;
+    }
+    ret = esp_bt_controller_enable(ESP_BT_MODE_BLE);
+    if (ret != ESP_OK) {
+#ifdef DEBUG
+      Serial.println("esp_bt_controller_enable failed");
+#endif      
+//      return;
+    }
+*/    
     ret = esp_bluedroid_init();
     if (ret) {
 #ifdef DEBUG
@@ -1274,7 +1435,7 @@ void PrepareBlueTooth() {
       Serial.println("esp_ble_tx_power_set failed ESP_BLE_PWR_TYPE_DEFAULT");
     }
 #endif      
-    ret = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV,ESP_PWR_LVL_N14);
+//    ret = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV,ESP_PWR_LVL_N14);
 //    ret = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT,ESP_PWR_LVL_N11);
 //    ret = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT,ESP_PWR_LVL_N8);
 #ifdef DEBUG
@@ -1819,9 +1980,11 @@ void setup() {
   byte b1;
 #endif
 
+/*
   enable_WDT(1);
   rtc_clk_cpu_freq_set(RTC_CPU_FREQ_80M);
   disable_WDT();
+*/  
 #ifdef DEBUG
   Serial.begin(115200);
   while (!Serial) {
@@ -2261,6 +2424,7 @@ void print_bt_packet() {
   RawRecord msg;  
   byte msg_len;
   unsigned long t1;
+  boolean need_confirm;
 
 #ifdef DEBUG
   Serial.print("Transmit bt data. bt_format = ");
@@ -2308,6 +2472,7 @@ void print_bt_packet() {
     sprintf(radio_buff,"%lu %d %d\r\n",dex_num_decoder(Pkt.raw),Pkt.battery,battery_milivolts);
     msg_len = strlen(radio_buff);
     ack_recieved = true;
+    need_confirm = false;
   }  
   else if (settings.bt_format == 2) { 
     msg.cmd_code = 0x00;
@@ -2332,8 +2497,9 @@ void print_bt_packet() {
     radio_buff[16] = msg.function;
     msg_len = sizeof(msg);
     ack_recieved = false;
+    need_confirm = true;
   }
-  esp_err_t ret = esp_ble_gatts_send_indicate(ble_gatts_if, ble_conn_id, ble_attr_handle, msg_len,(uint8_t*)&radio_buff[0], false); 
+  esp_err_t ret = esp_ble_gatts_send_indicate(ble_gatts_if, ble_conn_id, ble_attr_handle, msg_len,(uint8_t*)&radio_buff[0], need_confirm); 
 #ifdef DEBUG
   if (ret == ESP_OK) {
     Serial.println("Send indicate OK");    
@@ -2342,10 +2508,11 @@ void print_bt_packet() {
     Serial.println("Send indicate fail");
   }  
 #endif
+  if (ack_recieved) delay(500);
   t1 = millis();
   while (!ack_recieved) {
     delay(200);
-    if (millis() - t1 > WAKEUP_BT_TIME) break;
+    if (millis() - t1 > WAKEUP_BT_TIME || !ble_connected) break;
   }
   stop_bluetooth();
 #ifdef INT_BLINK_LED    
@@ -2379,7 +2546,7 @@ boolean print_modem_packet() {
   return res1;
 }
 #endif
-
+/*
 void HandleWebClient() {
   String http_method;  
   String req2;
@@ -2439,10 +2606,11 @@ void HandleWebClient() {
     }    
   }  
 }
-
+*/
 void stop_bluetooth() {
   esp_bluedroid_status_t stat;
-
+  
+//  enable_WDT(5);
   try {
     stat = esp_bluedroid_get_status();
     if (stat == ESP_BLUEDROID_STATUS_ENABLED) {
@@ -2453,6 +2621,7 @@ void stop_bluetooth() {
       delay(500);
       unsigned long t1 = millis();
       while (ble_connected) {
+//        feed_WDT();
         delay(100);       
         if (millis() - t1 > WAKEUP_BT_TIME) break;
       }
@@ -2461,14 +2630,17 @@ void stop_bluetooth() {
 #endif
       stat = esp_bluedroid_get_status();
     }  
+    enable_WDT(5);
+    
     if (stat == ESP_BLUEDROID_STATUS_INITIALIZED) {
 #ifdef DEBUG
       Serial.println("bluedroid_deinit start");      
 #endif
       esp_bluedroid_deinit();
       unsigned long t1 = millis();
-      delay(1000);
+      delay(500);
       while (ble_connected) {
+        feed_WDT();
         delay(100);       
         if (millis() - t1 > WAKEUP_BT_TIME) break;
       }
@@ -2479,10 +2651,14 @@ void stop_bluetooth() {
 #ifdef DEBUG
     Serial.println("btStop start");      
 #endif
+//    esp_bt_controller_disable();
+//    esp_bt_controller_deinit();
+    feed_WDT();
     btStop();  
-    delay(1000);
+    delay(500);
     unsigned long t1 = millis();
     while (ble_connected) {
+      feed_WDT();
       delay(100);       
       if (millis() - t1 > WAKEUP_BT_TIME) break;
     }
@@ -2494,6 +2670,7 @@ void stop_bluetooth() {
     Serial.println("Error on stoping BT");      
 #endif
   }
+  disable_WDT();
   ble_gatts_if = ESP_GATT_IF_NONE;
   ble_conn_id = 0;
 }
@@ -2721,13 +2898,17 @@ void loop() {
 #ifdef EXT_BLINK_LED    
     blink_red_led_half();
 #endif
+/*
     client = server.available();
     if (client) {
       HandleWebClient();
     }
+*/    
+    server2.handleClient();
     delay(1);
-    if ((millis() - web_server_start_time) > TWO_MINUTE && !server.hasClient()) {
-      server.stop();
+//    if ((millis() - web_server_start_time) > TWO_MINUTE && !server.hasClient()) {
+    if ((millis() - web_server_start_time) > TWO_MINUTE && !server2.client()) {
+      server2.stop();
       WiFi.softAPdisconnect(true);
       web_server_start_time = 0;  
 #ifdef DEBUG
