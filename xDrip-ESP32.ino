@@ -7,7 +7,7 @@
 //#define PCB_V1
 //#define PCB_V2
 #define PCB_V3
-//#define USE_FREQEST    
+#define USE_FREQEST    
 #define DEEP_SLEEP_MODE
 #define BT_PAIRING 
 
@@ -46,7 +46,7 @@ extern "C" {
 uint8_t temprature_sens_read(); 
 }
 
-#define VERSION_NUM "1.6.1"
+#define VERSION_NUM "1.6.2"
 
 #define LEN_PIN    GPIO_NUM_5             // Цифровой канал, к которму подключен контакт LEN (усилитель слабого сигнала) платы CC2500 (Предыдущее значение 17).
 #define BAT_PIN    GPIO_NUM_34            // Аналоговый канал для измерения напряжения питания
@@ -169,7 +169,7 @@ volatile boolean ack_recieved;
 volatile boolean ble_connected;
 
 #ifdef USE_FREQEST
-byte fOffset[NUM_CHANNELS] = { 0x00, 0x00, 0x00, 0x00 };
+RTC_DATA_ATTR byte fOffset[NUM_CHANNELS] = { 0x00, 0x00, 0x00, 0x00 };
 #else
 byte fOffset[NUM_CHANNELS] = { 0xE4, 0xE3, 0xE2, 0xE2 };
 #endif
@@ -419,37 +419,6 @@ unsigned long checksum_settings()
   }
   return chk;
 }
-
-#ifdef USE_FREQEST    
-void saveOffsetToFlash()
-{ 
-  byte i;
-  int start_pos;
-
-  start_pos = sizeof(parakeet_settings);
-  EEPROM.begin(start_pos + 4);
-  for (i = 0; i < 4; i++)
-  {
-    EEPROM.write(start_pos+i,fOffset[i]);
-    
-  }
-  EEPROM.commit();
-}
-
-void loadOffsetFromFlash()
-{ 
-  byte i;
-  int start_pos;
-
-  start_pos = sizeof(parakeet_settings);
-  EEPROM.begin(start_pos + 4);
-  for (i = 0; i < 4; i++)
-  {
-    fOffset[i] = EEPROM.read(start_pos+i);
-  }
-  
-}
-#endif
 
 void saveSettingsToFlash()
 {
@@ -2085,16 +2054,10 @@ void setup() {
     }
 */    
     mesure_battery();   
-#ifdef USE_FREQEST    
-    loadOffsetFromFlash(); // Считываем текущие смещения частоты и постояной памяти
-#endif
   } 
   else {
 #ifdef DEBUG
     Serial.println("It's not wake up. It was turn ON!");      
-#endif
-#ifdef USE_FREQEST    
-    saveOffsetToFlash(); // Сохраняем смещения частоты по умолчанию в постоянной памяти
 #endif
     PrepareWebServer();
 
@@ -3044,12 +3007,11 @@ void loop() {
 #endif
 
   packet_len = ReadRadioBuffer(current_channel);
+#ifdef USE_FREQEST
   if (packet_len == 0 || packet_len == 21) {
     freqest = ReadStatus(FREQEST);
-//    fOffset[current_channel] += freqest;
-    fOffset[current_channel] = freqest;
-#ifdef USE_FREQEST    
-    saveOffsetToFlash(); // Сохраняем смещения частоты по умолчанию в постоянной памяти
+    fOffset[current_channel] += freqest;
+//    fOffset[current_channel] = freqest;
 #ifdef DEBUG
     Serial.print("Offset:");
     Serial.println(fOffset[current_channel], HEX);
