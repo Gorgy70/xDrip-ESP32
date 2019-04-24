@@ -7,7 +7,7 @@
 //#define PCB_V1
 //#define PCB_V2
 #define PCB_V3
-#define USE_FREQEST    
+//#define USE_FREQEST    
 #define DEEP_SLEEP_MODE
 #define BT_PAIRING 
 
@@ -46,7 +46,7 @@ extern "C" {
 uint8_t temprature_sens_read(); 
 }
 
-#define VERSION_NUM "1.6.2"
+#define VERSION_NUM "1.6.3"
 
 #define LEN_PIN    GPIO_NUM_5             // Цифровой канал, к которму подключен контакт LEN (усилитель слабого сигнала) платы CC2500 (Предыдущее значение 17).
 #define BAT_PIN    GPIO_NUM_34            // Аналоговый канал для измерения напряжения питания
@@ -3016,8 +3016,8 @@ void loop() {
     Serial.print("Offset:");
     Serial.println(fOffset[current_channel], HEX);
 #endif
-#endif
   }
+#endif
   if (Pkt.src_addr == dex_tx_id) {
 #ifdef DEBUG
     Serial.print("gdo0_status = ");
